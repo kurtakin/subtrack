@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SubTrack - Subscription & Bill Tracker</title>
+    <meta name="description" content="Aylık bütçe, harcama ve abonelik takip uygulaması. LocalStorage tabanlı, grafik karşılaştırmalı ve oran alarmlı." />
+    <meta property="og:title" content="SubTrack - Subscription & Bill Tracker" />
+    <meta property="og:description" content="Aylık bütçe, harcama ve abonelik takip uygulaması. LocalStorage tabanlı, grafik karşılaştırmalı ve oran alarmlı." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      try {
+        let _fetch = window.fetch;
+        Object.defineProperty(window, 'fetch', {
+          get: function() { return _fetch; },
+          set: function(fn) { _fetch = fn; },
+          configurable: true,
+          enumerable: true
+        });
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

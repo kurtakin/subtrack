@@ -1,0 +1,6 @@
+{
+  "name": "SubTrack - Subscription & Bill Tracker",
+  "description": "Aylık bütçe, harcama ve abonelik takip uygulaması. LocalStorage tabanlı, grafik karşılaştırmalı ve oran alarmlı.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
