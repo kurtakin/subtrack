@@ -354,15 +354,18 @@ export const InstallmentsView: React.FC<InstallmentsViewProps> = ({
               } catch {}
             }
 
+            const isAuto = Boolean(inst.isAutoPayment);
+            const isInstCardGreen = isCompleted || isPaidThisMonth || isAuto;
+
             return (
               <motion.div
                 key={inst.id}
                 layout
                 initial={{ opacity: 0, scale: 0.98 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className={`p-5 rounded-3xl border transition-all flex flex-col justify-between overflow-hidden ${
-                  isCompleted
-                    ? 'bg-emerald-50/20 dark:bg-emerald-950/10 border-emerald-100 dark:border-emerald-900/30'
+                className={`p-5 rounded-3xl border transition-all flex flex-col justify-between overflow-hidden shadow-xs ${
+                  isInstCardGreen
+                    ? 'bg-gradient-to-br from-emerald-50/50 via-white to-emerald-50/20 dark:from-emerald-950/30 dark:via-gray-900 dark:to-emerald-950/15 border-emerald-300 dark:border-emerald-700/80 shadow-emerald-500/10 hover:border-emerald-400'
                     : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 shadow-sm hover:border-purple-200 dark:hover:border-purple-900/40'
                 }`}
               >

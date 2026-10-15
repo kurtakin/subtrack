@@ -136,10 +136,10 @@ export const TaxSettingsModal: React.FC<TaxSettingsModalProps> = ({
                       type="button"
                       onClick={() => {
                         setCountry(reg.code);
-                        if (!taxPeriodReminderNote || taxPeriodReminderNote.includes('Vergi Beyanı') || taxPeriodReminderNote.includes('Tax Return') || taxPeriodReminderNote.includes('Vergi İdaresi') || taxPeriodReminderNote.includes('Tax Authority') || taxPeriodReminderNote.includes('Son Beyan') || taxPeriodReminderNote.includes('Filing Deadline')) {
+                        if (!taxPeriodReminderNote || taxPeriodReminderNote.includes('Vergi Beyani') || taxPeriodReminderNote.includes('Vergi Beyanı') || taxPeriodReminderNote.includes('Tax Return') || taxPeriodReminderNote.includes('Vergi Idaresi') || taxPeriodReminderNote.includes('Vergi İdaresi') || taxPeriodReminderNote.includes('Tax Authority') || taxPeriodReminderNote.includes('Son Beyan') || taxPeriodReminderNote.includes('Filing Deadline')) {
                           setTaxPeriodReminderNote(
                             language === 'tr'
-                              ? `${reg.countryName} Vergi İdaresi: ${reg.taxAuthority} - Son Beyan: ${reg.filingDeadline}`
+                              ? `${reg.countryName} Vergi Idaresi: ${reg.taxAuthority} - Son Beyan: ${reg.filingDeadline}`
                               : `${reg.countryName} Tax Authority: ${reg.taxAuthority} - Filing Deadline: ${reg.filingDeadline}`
                           );
                         }

@@ -139,13 +139,20 @@ export const RegularPaymentsView: React.FC<RegularPaymentsViewProps> = ({
   // Stats Calculations for the Selected Month
   const stats = useMemo(() => {
     const active = payments.filter(p => p.status === 'active');
-    const totalMonthlyCommitment = active.reduce((acc, curr) => acc + (curr.amount || 0), 0);
+    const getMonthlyEquivalent = (curr: RegularPayment) => {
+      if (curr.frequency === 'quarterly') return (curr.amount || 0) / 3;
+      if (curr.frequency === 'annual') return (curr.amount || 0) / 12;
+      if (curr.frequency === 'bimonthly') return (curr.amount || 0) / 2;
+      return curr.amount || 0;
+    };
+
+    const totalMonthlyCommitment = active.reduce((acc, curr) => acc + getMonthlyEquivalent(curr), 0);
 
     const paidThisMonthList = active.filter(p => isPaymentPaidInSelectedMonth(p, selectedMonth));
-    const paidThisMonthTotal = paidThisMonthList.reduce((acc, curr) => acc + (curr.amount || 0), 0);
+    const paidThisMonthTotal = paidThisMonthList.reduce((acc, curr) => acc + getMonthlyEquivalent(curr), 0);
 
     const pendingThisMonthList = active.filter(p => !isPaymentPaidInSelectedMonth(p, selectedMonth));
-    const pendingThisMonthTotal = pendingThisMonthList.reduce((acc, curr) => acc + (curr.amount || 0), 0);
+    const pendingThisMonthTotal = pendingThisMonthList.reduce((acc, curr) => acc + getMonthlyEquivalent(curr), 0);
 
     const fixedCount = active.filter(p => p.amountType === 'fixed').length;
     const variableCount = active.filter(p => p.amountType === 'variable').length;
@@ -515,7 +522,7 @@ export const RegularPaymentsView: React.FC<RegularPaymentsViewProps> = ({
             const todayStr = new Date().toISOString().split('T')[0];
             const isDueOrPast = Boolean(payment.nextPaymentDate && payment.nextPaymentDate <= todayStr);
             const isAutoPaidDue = Boolean(payment.isAutoPayment && isDueOrPast);
-            const isCardGreen = isPaidInSelected || isAutoPaidDue;
+            const isCardGreen = isPaidInSelected || isAutoPaidDue || Boolean(payment.isAutoPayment);
             const catConfig = CATEGORY_CONFIG[payment.category] || CATEGORY_CONFIG.other;
             const CatIcon = catConfig.icon;
 
@@ -532,7 +539,12 @@ export const RegularPaymentsView: React.FC<RegularPaymentsViewProps> = ({
                 layout
                 initial={{ opacity: 0, scale: 0.98 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="p-5 rounded-3xl border transition-all flex flex-col justify-between overflow-hidden bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 shadow-xs hover:border-amber-200 dark:hover:border-amber-900/40"
+                className={cn(
+                  "p-5 rounded-3xl border transition-all flex flex-col justify-between overflow-hidden shadow-xs",
+                  isCardGreen
+                    ? "bg-gradient-to-br from-emerald-50/50 via-white to-emerald-50/20 dark:from-emerald-950/30 dark:via-gray-900 dark:to-emerald-950/15 border-emerald-300 dark:border-emerald-700/80 shadow-emerald-500/10 hover:border-emerald-400"
+                    : "bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:border-amber-200 dark:hover:border-amber-900/40"
+                )}
               >
                 {/* Top Section */}
                 <div className="space-y-4">
@@ -602,6 +614,7 @@ export const RegularPaymentsView: React.FC<RegularPaymentsViewProps> = ({
                       <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-emerald-600 text-white text-[10px] font-extrabold rounded-lg shadow-xs" title={isAutoPaidDue ? t('autoPaidGreen', 'Otomatik Ödendi') : t('calendarGreenPaid', 'Ödendi')}>
                         <Check className="w-2.5 h-2.5 text-white" />
                         <span>{isPaidInSelected ? t('paidThisMonthLabel', 'Ödendi') : t('autoPaidGreen', 'Otomatik Ödendi')}</span>
+                        {payment.calendarEventId && <Calendar className="w-2.5 h-2.5 text-emerald-200 ml-0.5" />}
                       </span>
                     ) : payment.calendarEventId ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold rounded-lg border border-emerald-200 dark:border-emerald-800">

@@ -1,5 +1,5 @@
 import React, { useState, useContext, useRef, useEffect } from 'react';
-import { CreditCard, Sun, Moon, BellRing, UserCheck, LogOut, LogIn, ShoppingBag, Home, LayoutDashboard, Globe, ChevronDown, Check } from 'lucide-react';
+import { CreditCard, Sun, Moon, BellRing, UserCheck, LogOut, LogIn, ShoppingBag, Home, LayoutDashboard, Globe, ChevronDown, Check, TrendingUp, PiggyBank } from 'lucide-react';
 import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import { AuthContext } from '../context/AuthContext';
@@ -9,18 +9,24 @@ import { NotificationSettingsModal } from './NotificationSettingsModal';
 import { setCachedAccessToken } from '../services/googleCalendar';
 import { cn } from '../lib/utils';
 
+export type MainNavTab = 'dashboard' | 'subscriptions' | 'installments' | 'regularPayments' | 'incomeSources' | 'savingsFunds' | 'tax' | 'settings';
+
 interface NavbarProps {
-  activeTab?: 'dashboard' | 'subscriptions' | 'installments' | 'regularPayments';
-  onSelectTab?: (tab: 'dashboard' | 'subscriptions' | 'installments' | 'regularPayments') => void;
+  activeTab?: MainNavTab;
+  onSelectTab?: (tab: MainNavTab) => void;
   activeInstallmentsCount?: number;
   activeRegularPaymentsCount?: number;
+  incomesCount?: number;
+  savingsCount?: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   activeTab = 'subscriptions',
   onSelectTab,
   activeInstallmentsCount = 0,
-  activeRegularPaymentsCount = 0
+  activeRegularPaymentsCount = 0,
+  incomesCount = 0,
+  savingsCount = 0
 }) => {
   const { user, profile, toggleDarkMode, darkMode, openAuthModal } = useContext(AuthContext);
   const { language, setLanguage, t } = useTranslation();
@@ -47,9 +53,9 @@ export const Navbar: React.FC<NavbarProps> = ({
       <nav className="sticky top-0 z-50 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-100 dark:border-gray-800 transition-colors">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
-            <div className="flex items-center gap-3 sm:gap-6">
+            <div className="flex items-center gap-3 sm:gap-6 min-w-0">
               <div 
-                className="flex items-center gap-2 cursor-pointer"
+                className="flex items-center gap-2 cursor-pointer shrink-0"
                 onClick={() => onSelectTab && onSelectTab('dashboard')}
               >
                 <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200 dark:shadow-blue-900/20">
@@ -59,37 +65,39 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
 
               {onSelectTab && (
-                <div className="flex items-center bg-gray-100 dark:bg-gray-800 p-1 rounded-2xl border border-gray-200/60 dark:border-gray-700/60 text-xs font-extrabold">
+                <div className="flex items-center bg-gray-100 dark:bg-gray-800 p-1 rounded-2xl border border-gray-200/60 dark:border-gray-700/60 text-xs font-extrabold overflow-x-auto no-scrollbar max-w-full">
                   <button
                     type="button"
                     onClick={() => onSelectTab('dashboard')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all cursor-pointer shrink-0 ${
                       activeTab === 'dashboard'
                         ? 'bg-white dark:bg-gray-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
                         : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
                     }`}
                   >
                     <LayoutDashboard className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">{t('dashboard')}</span>
-                    <span className="sm:hidden">{t('summary')}</span>
+                    <span className="hidden md:inline">{t('dashboard')}</span>
+                    <span className="md:hidden">{t('summary')}</span>
                   </button>
+
                   <button
                     type="button"
                     onClick={() => onSelectTab('subscriptions')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all cursor-pointer shrink-0 ${
                       activeTab === 'subscriptions'
                         ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs'
                         : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
                     }`}
                   >
                     <CreditCard className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">{t('subscriptions')}</span>
-                    <span className="sm:hidden">{t('bills')}</span>
+                    <span className="hidden md:inline">{t('subscriptions')}</span>
+                    <span className="md:hidden">{t('bills')}</span>
                   </button>
+
                   <button
                     type="button"
                     onClick={() => onSelectTab('installments')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all cursor-pointer shrink-0 ${
                       activeTab === 'installments'
                         ? 'bg-white dark:bg-gray-900 text-purple-600 dark:text-purple-400 shadow-xs'
                         : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
@@ -103,21 +111,62 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </span>
                     )}
                   </button>
+
                   <button
                     type="button"
                     onClick={() => onSelectTab('regularPayments')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all cursor-pointer shrink-0 ${
                       activeTab === 'regularPayments'
                         ? 'bg-white dark:bg-gray-900 text-amber-600 dark:text-amber-400 shadow-xs'
                         : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
                     }`}
                   >
                     <Home className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">{t('regularPayments')}</span>
-                    <span className="sm:hidden">{t('payments')}</span>
+                    <span className="hidden md:inline">{t('regularPayments')}</span>
+                    <span className="md:hidden">{t('payments')}</span>
                     {activeRegularPaymentsCount > 0 && (
                       <span className="px-1.5 py-0.2 bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 rounded-full text-[10px] font-black">
                         {activeRegularPaymentsCount}
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onSelectTab('incomeSources')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all cursor-pointer shrink-0 ${
+                      activeTab === 'incomeSources'
+                        ? 'bg-white dark:bg-gray-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                        : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
+                    }`}
+                    title={t('monthlyIncomeSources')}
+                  >
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    <span className="hidden lg:inline">{t('monthlyIncomeSources')}</span>
+                    <span className="lg:hidden">{language === 'tr' ? 'Gelirler' : 'Incomes'}</span>
+                    {incomesCount > 0 && (
+                      <span className="px-1.5 py-0.2 bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 rounded-full text-[10px] font-black">
+                        {incomesCount}
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onSelectTab('savingsFunds')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all cursor-pointer shrink-0 ${
+                      activeTab === 'savingsFunds'
+                        ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-xs'
+                        : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
+                    }`}
+                    title={t('savingsTargets')}
+                  >
+                    <PiggyBank className="w-3.5 h-3.5" />
+                    <span className="hidden lg:inline">{t('savingsTargets')}</span>
+                    <span className="lg:hidden">{language === 'tr' ? 'Birikimler' : 'Savings'}</span>
+                    {savingsCount > 0 && (
+                      <span className="px-1.5 py-0.2 bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 rounded-full text-[10px] font-black">
+                        {savingsCount}
                       </span>
                     )}
                   </button>
@@ -242,3 +291,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     </>
   );
 };
+
+export { AppSidebar } from './AppSidebar';
+export { AppHeader } from './AppHeader';
+

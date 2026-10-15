@@ -91,9 +91,11 @@ export const SubscriptionCard: React.FC<{
     );
   }, [subPayments, sub.lastPaidMonth, currentMonthStr]);
 
+  const isAuto = Boolean(sub.isAutoPayment);
   const isSubDueOrPast = Boolean(sub.nextPaymentDate && sub.nextPaymentDate.slice(0, 10) <= todayStr);
-  const isSubAutoPaid = Boolean(sub.isAutoPayment && (isSubDueOrPast || isPaidThisMonth));
-  const isSubPaid = isPaidThisMonth || isSubAutoPaid;
+  const isSubAutoPaid = isAuto;
+  const isSubPaid = isPaidThisMonth || isAuto;
+  const isGreenCard = isSubPaid || isAuto;
   const isOverdue = !isUsageBased && daysRemaining < 0 && !isSubPaid;
 
   const totalPaid = useMemo(() => {
@@ -107,7 +109,10 @@ export const SubscriptionCard: React.FC<{
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95 }}
       className={cn(
-        "group bg-white dark:bg-gray-900 p-4 rounded-2xl border border-gray-100 dark:border-gray-800 hover:border-blue-200 dark:hover:border-blue-800 hover:shadow-xl hover:shadow-blue-50/50 dark:hover:shadow-blue-900/10 transition-all flex flex-col justify-between",
+        "group p-4 rounded-2xl border transition-all flex flex-col justify-between",
+        isGreenCard
+          ? "bg-gradient-to-br from-emerald-50/60 via-white to-emerald-50/30 dark:from-emerald-950/35 dark:via-gray-900 dark:to-emerald-950/20 border-emerald-300 dark:border-emerald-700/80 shadow-md shadow-emerald-500/10 hover:border-emerald-400 dark:hover:border-emerald-600"
+          : "bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:border-blue-200 dark:hover:border-blue-800 hover:shadow-xl hover:shadow-blue-50/50 dark:hover:shadow-blue-900/10",
         !isActive && "opacity-60 grayscale-[0.5]"
       )}
     >
@@ -122,12 +127,16 @@ export const SubscriptionCard: React.FC<{
             <div className="flex items-center gap-3">
               <div className={cn(
                 "w-12 h-12 rounded-xl flex items-center justify-center transition-colors",
-                isActive ? "bg-gray-50 dark:bg-gray-800 text-gray-400 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400" : "bg-gray-100 dark:bg-gray-800 text-gray-400"
+                isGreenCard
+                  ? "bg-emerald-100/70 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300"
+                  : isActive
+                  ? "bg-gray-50 dark:bg-gray-800 text-gray-400 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400"
+                  : "bg-gray-100 dark:bg-gray-800 text-gray-400"
               )}>
                 <IconComponent className="w-6 h-6" />
               </div>
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <h3 className={cn("font-bold text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors", !isActive && "line-through")}>
                     {sub.name}
                   </h3>
@@ -143,15 +152,21 @@ export const SubscriptionCard: React.FC<{
                       {t('hybrid')}
                     </span>
                   )}
-                  {isSubPaid ? (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-600 text-white text-[10px] font-bold rounded-md shadow-xs" title={isSubAutoPaid ? (t('autoPaidGreen') || 'Otomatik Ödendi') : (t('paidThisMonthGreen') || 'Bu Ay Ödendi')}>
-                      <Check className="w-2.5 h-2.5 text-white" />
-                      <span>{isSubAutoPaid ? (t('autoPaidGreen') || 'Otomatik Ödendi') : (t('paidThisMonthGreen') || 'Bu Ay Ödendi')}</span>
+                  {isAuto ? (
+                    <span 
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-200 border border-emerald-300/80 dark:border-emerald-800 shadow-2xs"
+                      title={language === 'tr' ? 'Otomatik Ödeme Aktif (Google Takvimde Yeşil)' : 'Auto-Pay Active (Green in Google Calendar)'}
+                    >
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                      <span>{language === 'tr' ? 'Otomatik Ödeme' : 'Auto-Pay'}</span>
                     </span>
-                  ) : sub.calendarEventId ? (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold rounded-md border border-emerald-200 dark:border-emerald-800" title={t('onCalendar')}>
-                      <Calendar className="w-2.5 h-2.5 text-emerald-600" />
-                      <span>{t('onCalendar')}</span>
+                  ) : isSubPaid ? (
+                    <span 
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-200 border border-emerald-300/80 dark:border-emerald-800 shadow-2xs"
+                      title={language === 'tr' ? 'Bu Ay Ödendi (Google Takvimde Yeşil)' : 'Paid This Month (Green in Google Calendar)'}
+                    >
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                      <span>{language === 'tr' ? 'Ödendi' : 'Paid'}</span>
                     </span>
                   ) : null}
                 </div>
@@ -351,6 +366,15 @@ export const SubscriptionCard: React.FC<{
                   <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-[10px] font-bold rounded-full uppercase flex items-center gap-1">
                     <Zap className="w-3 h-3" />
                     {t('autoShort')}
+                  </span>
+                )}
+                {isSubPaid && (
+                  <span 
+                    className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-extrabold rounded-full flex items-center gap-1 border border-emerald-200/80 dark:border-emerald-800/60"
+                    title={isSubAutoPaid ? (t('autoPaidGreen') || 'Otomatik Ödendi') : (t('paidThisMonthGreen') || 'Bu Ay Ödendi')}
+                  >
+                    <Check className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 stroke-[3]" />
+                    <span>{isSubAutoPaid ? (t('autoPaidCheck') || 'Otomatik Ödendi ✓') : (t('paidThisMonthLabel') || 'Bu Ay Ödendi')}</span>
                   </span>
                 )}
                 {sub.calendarEventId && (

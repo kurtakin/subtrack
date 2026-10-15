@@ -10,8 +10,8 @@ export interface TaxRegionInfo {
   flag: string;
   currency: string;
   filingDeadline: string; // Beyan son tarihi
-  taxAuthority: string; // Vergi İdaresi (CRA, IRS, GİB vb.)
-  refundPeriod: string; // İade alınma dönemi
+  taxAuthority: string; // Tax Authority (CRA, IRS, GIB etc.)
+  refundPeriod: string; // Tax refund processing period
   refundTips: string[];
   keyDates: { title: string; date: string; description: string }[];
 }
@@ -63,7 +63,7 @@ export const COUNTRY_TAX_REGIONS: Record<CountryTaxRegion, TaxRegionInfo> = {
     flag: '🇹🇷',
     currency: 'TRY',
     filingDeadline: 'March 31 (1st Installment) / July 31 (2nd Installment)',
-    taxAuthority: 'GİB (Turkish Revenue Administration)',
+    taxAuthority: 'GIB (Turkish Revenue Administration)',
     refundPeriod: 'Within 1-3 months following annual return review',
     refundTips: [
       'Taxes withheld at source are offset or refunded in annual income tax returns.',
@@ -143,115 +143,115 @@ const TURKISH_TAX_REGIONS: Record<CountryTaxRegion, TaxRegionInfo> = {
     flag: '🇨🇦',
     currency: 'CAD',
     filingDeadline: '30 Nisan (Bireysel) / 15 Haziran (Serbest Meslek)',
-    taxAuthority: 'CRA (Kanada Vergi İdaresi)',
-    refundPeriod: 'Genellikle beyandan sonra 2-4 hafta içinde',
+    taxAuthority: 'CRA (Kanada Vergi Idaresi)',
+    refundPeriod: 'Genellikle beyandan sonra 2-4 hafta icinde',
     refundTips: [
-      'RRSP (Emeklilik Birikimi) katkıları vergi matrahından doğrudan düşülür ve yüksek iade sağlar.',
-      'FHSA (İlk Ev Birikimi) yıllık 8.000 CAD vergiden düşülebilir limit sağlar.',
-      'Tıbbi harcamalar (Medical Expenses) ve hayır kurumu bağışları (Donations) iadeyi artırır.',
-      'Evden çalışma (Home Office) giderleri çalışanlar için indirim konusu yapılabilir.'
+      'RRSP (Emeklilik Birikimi) katkilari vergi matrahindan dogrudan dusulur ve yuksek iade saglar.',
+      'FHSA (Ilk Ev Birikimi) yillik 8.000 CAD vergiden dusulebilir limit saglar.',
+      'Tibbi harcamalar (Medical Expenses) ve hayir kurumu bagislari (Donations) iadeyi artirir.',
+      'Evden calisma (Home Office) giderleri calisanlar icin indirim konusu yapilabilir.'
     ],
     keyDates: [
-      { title: 'RRSP Katkı Son Günü', date: '1 Mart 2026', description: 'Önceki yıl matrahından düşmek için son tarih' },
-      { title: 'Bireysel Beyan Son Günü', date: '30 Nisan 2026', description: 'CRA gelir vergisi beyanı ve borç ödemesi' },
-      { title: 'Self-Employed Beyan', date: '15 Haziran 2026', description: 'Serbest çalışanlar için beyan teslim tarihi' }
+      { title: 'RRSP Katki Son Gunu', date: '1 Mart 2026', description: 'Onceki yil matrahindan dusmek icin son tarih' },
+      { title: 'Bireysel Beyan Son Gunu', date: '30 Nisan 2026', description: 'CRA gelir vergisi beyani ve borc odemesi' },
+      { title: 'Self-Employed Beyan', date: '15 Haziran 2026', description: 'Serbest calisanlar icin beyan teslim tarihi' }
     ]
   },
   US: {
     code: 'US',
-    countryName: 'Amerika Birleşik Devletleri',
+    countryName: 'Amerika Birlesik Devletleri',
     flag: '🇺🇸',
     currency: 'USD',
     filingDeadline: '15 Nisan (Tax Day)',
     taxAuthority: 'IRS (Amerikan Vergi Dairesi)',
-    refundPeriod: 'Elektronik beyanla 21 gün içinde doğrudan hesaba',
+    refundPeriod: 'Elektronik beyanla 21 gun icinde dogrudan hesaba',
     refundTips: [
-      '401(k) ve Traditional IRA katkıları taxable income tutarını düşürür.',
-      'Child Tax Credit ve Earned Income Tax Credit (EITC) iade tutarını doğrudan yükseltir.',
-      'Eğitim kredileri (AOTC ve Lifetime Learning Credit) binlerce dolar vergi avantajı sağlar.',
-      'HSA (Health Savings Account) üçlü vergi avantajı sunar.'
+      '401(k) ve Traditional IRA katkilari taxable income tutarini dusurur.',
+      'Child Tax Credit ve Earned Income Tax Credit (EITC) iade tutarini dogrudan yukseltir.',
+      'Egitim kredileri (AOTC ve Lifetime Learning Credit) binlerce dolar vergi avantaji saglar.',
+      'HSA (Health Savings Account) uclu vergi avantaji sunar.'
     ],
     keyDates: [
-      { title: 'IRS Beyan Açılışı', date: '27 Ocak 2026', description: 'Elektronik vergi beyanlarının kabulü başlar' },
-      { title: 'Tax Day (Son Gün)', date: '15 Nisan 2026', description: 'Form 1040 federal beyan son teslimi' },
-      { title: 'Uzatma Son Günü', date: '15 Ekim 2026', description: 'Extension alanlar için son bildirim günü' }
+      { title: 'IRS Beyan Acilisi', date: '27 Ocak 2026', description: 'Elektronik vergi beyanlarinin kabulu baslar' },
+      { title: 'Tax Day (Son Gun)', date: '15 Nisan 2026', description: 'Form 1040 federal beyan son teslimi' },
+      { title: 'Uzatma Son Gunu', date: '15 Ekim 2026', description: 'Extension alanlar icin son bildirim gunu' }
     ]
   },
   TR: {
     code: 'TR',
-    countryName: 'Türkiye',
+    countryName: 'Turkiye',
     flag: '🇹🇷',
     currency: 'TRY',
     filingDeadline: '31 Mart (1. Taksit) / 31 Temmuz (2. Taksit)',
-    taxAuthority: 'GİB (Gelir İdaresi Başkanlığı)',
-    refundPeriod: 'Yıllık beyanname incelemesini takiben 1-3 ay içinde',
+    taxAuthority: 'GIB (Gelir Idaresi Baskanligi)',
+    refundPeriod: 'Yillik beyanname incelemesini takiben 1-3 ay icinde',
     refundTips: [
-      'Stopaj yoluyla kesilen vergiler, yıllık gelir vergisi beyannamesinde mahsup veya iade edilir.',
-      'Eğitim ve sağlık harcamaları beyan edilen gelirin %10’una kadar matrahtan indirilebilir.',
-      'Şahıs sigorta ve BES katkı payları belirli oranlarda vergi matrahından düşülebilir.',
-      'Kira geliri beyanında gerçek gider yöntemi tercih edilirse faturalı giderler gelirden düşülür.'
+      'Stopaj yoluyla kesilen vergiler, yillik gelir vergisi beyannamesinde mahsup veya iade edilir.',
+      'Egitim ve saglik harcamalari beyan edilen gelirin %10 una kadar matrahtan indirilebilir.',
+      'Sahis sigorta ve BES katki paylari belirli oranlarda vergi matrahindan dusulebilir.',
+      'Kira geliri beyaninda gercek gider yontemi tercih edilirse faturali giderler gelirden dusulur.'
     ],
     keyDates: [
-      { title: 'Yıllık Gelir Vergisi Beyanı', date: '1 - 31 Mart 2026', description: 'GİB Hazır Beyan üzerinden beyan ve 1. taksit' },
-      { title: '2. Taksit Ödemesi', date: '31 Temmuz 2026', description: 'Gelir vergisi ikinci taksit ödemesi' },
-      { title: 'MTV 1. ve 2. Taksit', date: 'Ocak ve Temmuz 2026', description: 'Motorlu Taşıtlar Vergisi dönemleri' }
+      { title: 'Yillik Gelir Vergisi Beyani', date: '1 - 31 Mart 2026', description: 'GIB Hazir Beyan uzerinden beyan ve 1. taksit' },
+      { title: '2. Taksit Odemesi', date: '31 Temmuz 2026', description: 'Gelir vergisi ikinci taksit odemesi' },
+      { title: 'MTV 1. ve 2. Taksit', date: 'Ocak ve Temmuz 2026', description: 'Motorlu Tasitlar Vergisi donemleri' }
     ]
   },
   EU: {
     code: 'EU',
-    countryName: 'Avrupa Birliği',
+    countryName: 'Avrupa Birligi',
     flag: '🇪🇺',
     currency: 'EUR',
-    filingDeadline: 'Ülkeye göre 31 Mayıs - 31 Temmuz',
+    filingDeadline: 'Ulkeye gore 31 Mayis - 31 Temmuz',
     taxAuthority: 'National Tax Offices (Finanzamt vb.)',
     refundPeriod: 'Beyandan sonra ortalama 6-12 hafta',
     refundTips: [
-      'Almanya (Finanzamt): Ortalama vergi iadesi 1.050 € civarındadır (Pendlerpauschale yol giderleri).',
-      'İşle ilgili harcamalar (Werbungskosten), taşınma masrafları ve profesyonel eğitimler iade sağlar.',
-      'Hollanda: 1 Nisan - 8 Mayıs tarihleri arasında beyan verenler 1 Temmuz öncesi iade alır.',
-      'Çocuk bakım masrafları ve bağışlar matrahtan indirilebilir.'
+      'Almanya (Finanzamt): Ortalama vergi iadesi 1.050 EUR civarindadir (Pendlerpauschale yol giderleri).',
+      'Isle ilgili harcamalar (Werbungskosten), tasinma masraflari ve profesyonel egitimler iade saglar.',
+      'Hollanda: 1 Nisan - 8 Mayis tarihleri arasinda beyan verenler 1 Temmuz oncesi iade alir.',
+      'Cocuk bakim masraflari ve bagislar matrahtan indirilebilir.'
     ],
     keyDates: [
-      { title: 'AB Vergi Sezonu Başlangıcı', date: '1 Mart 2026', description: 'Önceden doldurulmuş beyanların kontrolü' },
-      { title: 'Genel Beyan Bitişi', date: '31 Temmuz 2026', description: 'Bireysel vergi beyannamesi teslim son tarihi' },
-      { title: 'Vergi Danışmanlı Uzatma', date: '28 Şubat 2027', description: 'Steuerberater / Mali müşavirle yapılan beyanlar' }
+      { title: 'AB Vergi Sezonu Baslangici', date: '1 Mart 2026', description: 'Onceden doldurulmus beyanlarin kontrolu' },
+      { title: 'Genel Beyan Bitisi', date: '31 Temmuz 2026', description: 'Bireysel vergi beyannamesi teslim son tarihi' },
+      { title: 'Vergi Danismanli Uzatma', date: '28 Subat 2027', description: 'Steuerberater / Mali musavirle yapilan beyanlar' }
     ]
   },
   UK: {
     code: 'UK',
-    countryName: 'Birleşik Krallık',
+    countryName: 'Birlesik Krallik',
     flag: '🇬🇧',
     currency: 'GBP',
     filingDeadline: '31 Ocak (Online Self Assessment)',
-    taxAuthority: 'HMRC (İngiltere Vergi İdaresi)',
-    refundPeriod: 'Online bildirimlerde 2-4 hafta içinde',
+    taxAuthority: 'HMRC (Ingiltere Vergi Idaresi)',
+    refundPeriod: 'Online bildirimlerde 2-4 hafta icinde',
     refundTips: [
-      'Self Assessment beyanında iş masrafları ve pension katkıları iade hakkı doğurur.',
-      'Personal Allowance üst sınırına dikkat edilerek yardım bağışları (Gift Aid) beyan edilebilir.',
-      'İş amaçlı araç kullanımı milaj indirimi (Mileage Allowance) sağlar.'
+      'Self Assessment beyaninda is masraflari ve pension katkilari iade hakki dogurur.',
+      'Personal Allowance ust sinirina dikkat edilerek yardim bagislari (Gift Aid) beyan edilebilir.',
+      'Is amacli arac kullanimi milaj indirimi (Mileage Allowance) saglar.'
     ],
     keyDates: [
-      { title: 'Mali Yıl Bitişi', date: '5 Nisan 2026', description: 'UK mali yılının resmi kapanışı' },
-      { title: 'Kağıt Beyan', date: '31 Ekim 2026', description: 'Posta ile beyan gönderim son günü' },
-      { title: 'Online Self Assessment', date: '31 Ocak 2027', description: 'Online beyan ve vergi ödemesi son tarihi' }
+      { title: 'Mali Yil Bitisi', date: '5 Nisan 2026', description: 'UK mali yilinin resmi kapanisi' },
+      { title: 'Kagit Beyan', date: '31 Ekim 2026', description: 'Posta ile beyan gonderim son gunu' },
+      { title: 'Online Self Assessment', date: '31 Ocak 2027', description: 'Online beyan ve vergi odemesi son tarihi' }
     ]
   },
   OTHER: {
     code: 'OTHER',
-    countryName: 'Diğer Ülkeler / Uluslararası',
+    countryName: 'Diger Ulkeler / Uluslararasi',
     flag: '🌐',
     currency: 'USD',
-    filingDeadline: 'Yerel mevzuata göre değişken',
+    filingDeadline: 'Yerel mevzuata gore degisken',
     taxAuthority: 'Yerel Vergi Otoritesi',
-    refundPeriod: 'Yerel takvime göre',
+    refundPeriod: 'Yerel takvime gore',
     refundTips: [
-      'Yıl boyunca yapılan işle ilgili gider makbuzlarını ve faturaları saklayın.',
-      'Çifte vergilendirmeyi önleme anlaşmalarını (DTA) kontrol edin.',
-      'Emeklilik ve sağlık prim ödemelerini vergi matrahından düşmek için belgeleyin.'
+      'Yil boyunca yapilan isle ilgili gider makbuzlarini ve faturalari saklayin.',
+      'Cifte vergilendirmeyi onleme anlasmalarini (DTA) kontrol edin.',
+      'Emeklilik ve saglik prim odemelerini vergi matrahindan dusmek icin belgeleyin.'
     ],
     keyDates: [
-      { title: 'Yıl Sonu Mali Kapanış', date: '31 Aralık', description: 'Yıllık gelir ve harcamaların toplanması' },
-      { title: 'Genel Beyan Dönemi', date: 'Nisan - Haziran', description: 'Standart yıllık beyan dönemi' }
+      { title: 'Yil Sonu Mali Kapanis', date: '31 Aralik', description: 'Yillik gelir ve harcamalarin toplanmasi' },
+      { title: 'Genel Beyan Donemi', date: 'Nisan - Haziran', description: 'Standart yillik beyan donemi' }
     ]
   }
 };

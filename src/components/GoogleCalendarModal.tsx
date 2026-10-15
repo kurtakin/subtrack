@@ -26,6 +26,9 @@ import {
   syncEventToGoogleCalendar,
   syncInstallmentToGoogleCalendar,
   syncRegularPaymentToGoogleCalendar,
+  markRegularPaymentEventPaidInGoogleCalendar,
+  markInstallmentEventPaidInGoogleCalendar,
+  markSubscriptionEventPaidInGoogleCalendar,
   getCachedAccessToken,
   setCachedAccessToken,
   GoogleCalendarItem
@@ -213,6 +216,13 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
     }
     setSingleSyncingId(sub.id);
     setSyncStatusMessage(null);
+    const isSubPaidThisMonth = Boolean(
+      allPayments.some((p: any) => p.subscriptionId === sub.id && p.date?.startsWith(currentMonthStr) && p.status === 'paid') ||
+      sub.lastPaidMonth === currentMonthStr
+    );
+    const isSubAuto = Boolean(sub.isAutoPayment);
+    const isSubGreen = Boolean(isSubAuto || isSubPaidThisMonth);
+
     try {
       const result = await syncEventToGoogleCalendar(
         token,
@@ -225,7 +235,9 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
           billingCycle: sub.billingCycle,
           nextPaymentDate: sub.nextPaymentDate,
           status: sub.status,
-          note: sub.note
+          note: sub.note,
+          isAutoPayment: isSubAuto,
+          isPaid: isSubGreen
         },
         sub.calendarEventId
       );
@@ -316,6 +328,13 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
           await new Promise(r => setTimeout(r, 60));
 
           try {
+            const isSubPaidThisMonth = Boolean(
+              allPayments.some((p: any) => p.subscriptionId === sub.id && p.date?.startsWith(currentMonthStr) && p.status === 'paid') ||
+              sub.lastPaidMonth === currentMonthStr
+            );
+            const isSubAuto = Boolean(sub.isAutoPayment);
+            const isSubGreen = Boolean(isSubAuto || isSubPaidThisMonth);
+
             const result = await syncEventToGoogleCalendar(
               token!,
               selectedCalId || 'primary',
@@ -327,7 +346,9 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
                 billingCycle: sub.billingCycle,
                 nextPaymentDate: sub.nextPaymentDate,
                 status: sub.status,
-                note: sub.note
+                note: sub.note,
+                isAutoPayment: isSubAuto,
+                isPaid: isSubGreen
               },
               sub.calendarEventId
             );
@@ -421,7 +442,9 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
           remainingInstallments: inst.remainingInstallments || (inst.totalInstallments - (inst.paidInstallments || 0)),
           nextPaymentDate: inst.nextPaymentDate,
           bankOrCard: inst.bankOrCard,
-          note: inst.note
+          note: inst.note,
+          isAutoPayment: inst.isAutoPayment,
+          isPaid: Boolean(inst.isAutoPayment)
         },
         inst.calendarEventIds || inst.calendarEventId
       );
@@ -526,7 +549,9 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
                 remainingInstallments: inst.remainingInstallments || (inst.totalInstallments - (inst.paidInstallments || 0)),
                 nextPaymentDate: inst.nextPaymentDate,
                 bankOrCard: inst.bankOrCard,
-                note: inst.note
+                note: inst.note,
+                isAutoPayment: inst.isAutoPayment,
+                isPaid: Boolean(inst.isAutoPayment)
               },
               inst.calendarEventIds || inst.calendarEventId
             );
@@ -604,6 +629,15 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
     }
     setSingleSyncingId(regPay.id);
     try {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const currentMonthStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+      const isRegDueOrPast = Boolean(regPay.nextPaymentDate && regPay.nextPaymentDate <= todayStr);
+      const isPaidThisMonth = Boolean(
+        (regPay.paidMonths && regPay.paidMonths.includes(currentMonthStr)) ||
+        regPay.lastPaidMonth === currentMonthStr
+      );
+      const isPaid = isPaidThisMonth || Boolean(regPay.isAutoPayment);
+
       const result = await syncRegularPaymentToGoogleCalendar(
         token!,
         selectedCalId || 'primary',
@@ -618,7 +652,8 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
           isAutoPayment: regPay.isAutoPayment,
           bankOrCard: regPay.bankOrCard,
           accountOrSubscriberNo: regPay.accountOrSubscriberNo,
-          note: regPay.note
+          note: regPay.note,
+          isPaid
         },
         regPay.calendarEventId
       );
@@ -695,6 +730,15 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
           await new Promise(r => setTimeout(r, 60));
 
           try {
+            const todayStr = new Date().toISOString().split('T')[0];
+            const currentMonthStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+            const isRegDueOrPast = Boolean(reg.nextPaymentDate && reg.nextPaymentDate <= todayStr);
+            const isPaidThisMonth = Boolean(
+              (reg.paidMonths && reg.paidMonths.includes(currentMonthStr)) ||
+              reg.lastPaidMonth === currentMonthStr
+            );
+            const isPaid = isPaidThisMonth || Boolean(reg.isAutoPayment);
+
             const result = await syncRegularPaymentToGoogleCalendar(
               token!,
               selectedCalId || 'primary',
@@ -709,7 +753,8 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
                 isAutoPayment: reg.isAutoPayment,
                 bankOrCard: reg.bankOrCard,
                 accountOrSubscriberNo: reg.accountOrSubscriberNo,
-                note: reg.note
+                note: reg.note,
+                isPaid
               },
               reg.calendarEventId
             );
@@ -749,6 +794,162 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
         }
       }
     });
+  };
+
+  const [isRefreshingGreen, setIsRefreshingGreen] = useState(false);
+
+  const handleRefreshCalendarGreen = async () => {
+    let token = accessToken || getCachedAccessToken();
+    if (!token) {
+      try {
+        token = await connectGoogleCalendar();
+        setAccessToken(token);
+      } catch (err) {
+        return;
+      }
+    }
+    setIsRefreshingGreen(true);
+    setSyncStatusMessage({
+      type: 'info',
+      text: language === 'tr'
+        ? 'Günü gelen otomatik ödemeler taranıyor ve Google Takvim yeşile güncelleniyor...'
+        : 'Scanning due auto-payments and updating Google Calendar to green...'
+    });
+
+    try {
+      const calId = selectedCalId || 'primary';
+      let greenCount = 0;
+
+      // 1. Regular payments on auto-pay or paid
+      for (const reg of regularPayments) {
+        if (reg.status === 'active' && (reg.isAutoPayment || reg.lastPaidMonth)) {
+          try {
+            const res = await syncRegularPaymentToGoogleCalendar(
+              token!,
+              calId,
+              {
+                id: reg.id,
+                name: reg.name,
+                category: reg.category,
+                payee: reg.payee,
+                amount: reg.amount,
+                currency: profile?.currency || 'USD',
+                nextPaymentDate: reg.nextPaymentDate,
+                isAutoPayment: true,
+                bankOrCard: reg.bankOrCard,
+                accountOrSubscriberNo: reg.accountOrSubscriberNo,
+                note: reg.note,
+                isPaid: true
+              },
+              reg.calendarEventId
+            );
+            if (res?.eventId) {
+              greenCount++;
+              const updated = {
+                ...reg,
+                calendarEventId: res.eventId,
+                calendarSyncedAt: new Date().toISOString()
+              };
+              setDoc(doc(db, 'regularPayments', reg.id), updated, { merge: true }).catch(() => {});
+              onUpdateRegularPayment?.(updated);
+            }
+          } catch {}
+          await new Promise(r => setTimeout(r, 60));
+        }
+      }
+
+      // 2. Installments on auto-pay
+      for (const inst of installments) {
+        if (inst.status === 'active' && inst.isAutoPayment) {
+          try {
+            const res = await syncInstallmentToGoogleCalendar(
+              token!,
+              calId,
+              {
+                name: inst.name,
+                store: inst.store,
+                totalAmount: inst.totalAmount,
+                monthlyAmount: inst.monthlyAmount,
+                currency: profile?.currency || 'USD',
+                category: inst.category,
+                totalInstallments: inst.totalInstallments,
+                paidInstallments: inst.paidInstallments || 0,
+                remainingInstallments: inst.remainingInstallments || (inst.totalInstallments - (inst.paidInstallments || 0)),
+                nextPaymentDate: inst.nextPaymentDate,
+                bankOrCard: inst.bankOrCard,
+                note: inst.note,
+                isAutoPayment: true,
+                isPaid: true
+              },
+              inst.calendarEventIds || inst.calendarEventId
+            );
+            if (res?.eventId) {
+              greenCount++;
+              const updated = {
+                ...inst,
+                calendarEventId: res.eventId,
+                calendarEventIds: res.eventIds,
+                calendarEventMap: res.eventMap,
+                calendarSyncedAt: new Date().toISOString()
+              };
+              setDoc(doc(db, 'installments', inst.id), updated, { merge: true }).catch(() => {});
+              onUpdateInstallment?.(updated);
+            }
+          } catch {}
+          await new Promise(r => setTimeout(r, 60));
+        }
+      }
+
+      // 3. Subscriptions on auto-pay
+      for (const sub of subscriptions) {
+        if (sub.status === 'active' && sub.isAutoPayment) {
+          try {
+            const res = await syncEventToGoogleCalendar(
+              token!,
+              calId,
+              {
+                name: sub.name,
+                amount: sub.amount,
+                currency: profile?.currency || 'USD',
+                category: sub.category,
+                billingCycle: sub.billingCycle,
+                nextPaymentDate: sub.nextPaymentDate,
+                status: sub.status,
+                note: sub.note,
+                isAutoPayment: true,
+                isPaid: true
+              },
+              sub.calendarEventId
+            );
+            if (res?.eventId) {
+              greenCount++;
+              const updated = {
+                ...sub,
+                calendarEventId: res.eventId,
+                calendarSyncedAt: new Date().toISOString()
+              };
+              setDoc(doc(db, 'subscriptions', sub.id), updated, { merge: true }).catch(() => {});
+              onUpdateSubscription?.(updated);
+            }
+          } catch {}
+          await new Promise(r => setTimeout(r, 60));
+        }
+      }
+
+      setSyncStatusMessage({
+        type: 'success',
+        text: language === 'tr'
+          ? `✓ ${greenCount} adet otomatik ödeme Google Takvim'de yeşile (Ödendi) dönüştürüldü!`
+          : `✓ ${greenCount} auto-payments turned green (Paid) in Google Calendar!`
+      });
+    } catch (err: any) {
+      setSyncStatusMessage({
+        type: 'error',
+        text: err?.message || 'Error updating calendar status'
+      });
+    } finally {
+      setIsRefreshingGreen(false);
+    }
   };
 
   const handleDisconnect = async () => {
@@ -1021,6 +1222,37 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
                 </p>
               </div>
 
+              {/* Auto-Payments Green Color Status Notification Card */}
+              <div className="p-4 bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 rounded-2xl space-y-2.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                      <CheckCircle2 className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-extrabold text-emerald-900 dark:text-emerald-200">
+                        {language === 'tr' ? 'Otomatik Ödemeler Tarihi Geldiğinde Yeşile Döner' : 'Auto-Payments Turn Green on Due Date'}
+                      </h4>
+                      <p className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-0.5 leading-relaxed">
+                        {language === 'tr'
+                          ? 'Vadesi gelen veya ödenen otomatik fatura, taksit ve abonelikler Google Takviminizde yeşil renk (#10 Basil) ve [ÖDENDİ] etiketiyle işaretlenir.'
+                          : 'Due bills, installments, and subscriptions with auto-pay turn green (#10 Basil) with a [PAID] label in your Google Calendar.'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRefreshCalendarGreen}
+                    disabled={isRefreshingGreen || isSyncing}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shrink-0 shadow-xs disabled:opacity-50"
+                    title={language === 'tr' ? 'Günü gelen tüm otomatik ödemelerin takvim rengini yeşile güncelle' : 'Update calendar color to green for due auto-payments'}
+                  >
+                    <RefreshCw className={cn("w-3 h-3", isRefreshingGreen && "animate-spin")} />
+                    <span>{language === 'tr' ? 'Yeşile Güncelle' : 'Update Green'}</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Tab Selector */}
               <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-2xl text-xs font-bold gap-1">
                 <button
@@ -1279,28 +1511,44 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
                         (payments && payments.some(p => p.subscriptionId === sub.id && p.date && p.date.startsWith(currentMonthStr))) ||
                         sub.lastPaidMonth === currentMonthStr
                       );
+                      const isAuto = Boolean(sub.isAutoPayment);
                       const isSubDueOrPast = sub.nextPaymentDate && sub.nextPaymentDate <= todayStr;
-                      const isSubAutoPaid = Boolean(sub.isAutoPayment && (isSubDueOrPast || isPaidThisMonth));
-                      const isSubPaid = isPaidThisMonth || isSubAutoPaid;
+                      const isSubAutoPaid = isAuto;
+                      const isSubPaid = isAuto || isPaidThisMonth;
+                      const isGreenCard = isSubPaid || isAuto;
 
                       return (
                         <div 
                           key={sub.id}
-                          className="p-2.5 rounded-xl bg-gray-50 dark:bg-gray-800/40 border border-gray-100 dark:border-gray-800 flex items-center justify-between gap-2 text-xs"
+                          className={cn(
+                            "p-3 rounded-xl border flex items-center justify-between gap-2 text-xs transition-all",
+                            isGreenCard
+                              ? "bg-emerald-50/90 dark:bg-emerald-950/45 border-emerald-300 dark:border-emerald-700/80 shadow-2xs"
+                              : "bg-gray-50 dark:bg-gray-800/40 border-gray-100 dark:border-gray-800"
+                          )}
                         >
                           <div className="truncate flex-1">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="font-extrabold text-gray-900 dark:text-white truncate">{sub.name}</span>
                               <span className="text-[11px] font-semibold text-gray-500">${sub.amount}</span>
+                              {isAuto && (
+                                <span className="px-1.5 py-0.2 bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-200 text-[9px] font-black rounded border border-emerald-300/80">
+                                  {language === 'tr' ? 'Otomatik' : 'Auto'}
+                                </span>
+                              )}
                             </div>
                             <p className="text-[10px] text-gray-400 truncate">
                               {t('nextPaymentDate')}: {sub.nextPaymentDate?.split('T')[0] || '-'}
                             </p>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
-                            {isSubPaid ? (
-                              <span className="px-2 py-0.5 bg-emerald-600 text-white rounded-md font-bold text-[10px] flex items-center gap-1 shadow-xs" title={isSubAutoPaid ? t('autoPaidGreen') : t('paidThisMonthGreen')}>
-                                <Check className="w-3 h-3 text-white" /> {isSubAutoPaid ? t('autoPaidGreen') : t('paidThisMonthGreen')}
+                            {isAuto ? (
+                              <span className="px-2.5 py-1 bg-emerald-600 text-white rounded-lg font-bold text-[10px] flex items-center gap-1 shadow-xs" title={t('autoPaidGreen')}>
+                                <Check className="w-3 h-3 text-white" /> {language === 'tr' ? 'Otomatik (Yeşil)' : 'Auto-Pay (Green)'}
+                              </span>
+                            ) : isSubPaid ? (
+                              <span className="px-2.5 py-1 bg-emerald-600 text-white rounded-lg font-bold text-[10px] flex items-center gap-1 shadow-xs" title={t('paidThisMonthGreen')}>
+                                <Check className="w-3 h-3 text-white" /> {language === 'tr' ? 'Ödendi (Yeşil)' : 'Paid (Green)'}
                               </span>
                             ) : sub.calendarEventId ? (
                               <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900/50 rounded-md font-bold text-[10px] flex items-center gap-1">

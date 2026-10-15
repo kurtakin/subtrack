@@ -7,6 +7,12 @@ export interface UserProfile {
   photoURL: string;
   currency: string;
   darkMode?: boolean;
+  phone?: string;
+  location?: string;
+  occupation?: string;
+  bio?: string;
+  monthlyBudget?: number;
+  defaultPaymentMethod?: string;
   notificationSettings?: {
     browserNotifications: boolean;
     emailNotifications: boolean;
@@ -158,6 +164,21 @@ export interface TaxProfile {
   deductibleExpensesEstimate?: number; // Vergi matrahından düşülebilir tahmini giderler
   taxYear: number; // Örn: 2026
   taxPeriodReminderNote?: string;
+  updatedAt?: string;
+}
+
+export interface TaxYearRecord {
+  id: string;
+  uid?: string;
+  year: number; // Örn: 2026, 2025, 2024
+  grossIncome: number; // Yıllık Brüt Gelir
+  deductibleExpenses: number; // Düşülebilir Harcamalar / Katkılar
+  taxPaid: number; // Ödenen / Kesilen Vergi
+  taxRefund: number; // Alınan / Tahakkuk Eden Vergi İadesi
+  effectiveTaxRate?: number; // Efektif Vergi Oranı %
+  status: 'filed' | 'in_review' | 'pending' | 'refund_received';
+  filingDate?: string; // Beyan Tarihi
+  note?: string; // Açıklama / Vergi Dosyası Notu
   updatedAt?: string;
 }
 

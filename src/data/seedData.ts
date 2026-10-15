@@ -1,4 +1,4 @@
-import { Subscription, Payment, UserProfile, Installment, RegularPayment, IncomeItem, SavingsTarget, TaxProfile } from '../types';
+import { Subscription, Payment, UserProfile, Installment, RegularPayment, IncomeItem, SavingsTarget, TaxProfile, TaxYearRecord } from '../types';
 
 export const DEFAULT_USER_ID = 'user_kurtakinca';
 export const DEFAULT_USER_EMAIL = 'kurtakinca@gmail.com';
@@ -10,6 +10,12 @@ export const DEFAULT_PROFILE: UserProfile = {
   photoURL: 'https://ui-avatars.com/api/?name=Akin+Kurt&background=2563eb&color=fff',
   currency: 'USD',
   darkMode: false,
+  phone: '+1 (555) 349-2810',
+  location: 'Toronto, Canada',
+  occupation: 'Senior Software Architect / E-Commerce Specialist',
+  bio: 'Finansal özgürlük, teknoloji yatırımları ve düzenli bütçe yönetimi.',
+  monthlyBudget: 3500,
+  defaultPaymentMethod: 'Kredi Kartı (Visa Platinum)',
   notificationSettings: {
     browserNotifications: true,
     emailNotifications: true,
@@ -239,7 +245,17 @@ export const SEED_SUBSCRIPTIONS: Subscription[] = [
 ];
 
 export const SEED_PAYMENTS: Payment[] = [
-  // 10/1/2026,Sep-26,ChatGPT,Software,Aktif,Plan Yenilemesi,20,USD,
+  { id: 'p_20261028_paramount', uid: DEFAULT_USER_ID, subscriptionId: 'sub_paramount', amount: 10, date: '2026-10-28T00:00:00.000Z', status: 'paid', type: 'regular', note: 'Plan Yenilemesi' },
+  { id: 'p_20261025_railway', uid: DEFAULT_USER_ID, subscriptionId: 'sub_railway', amount: 7.11, date: '2026-10-25T00:00:00.000Z', status: 'paid', type: 'regular', note: 'Plan Yenilemesi' },
+  { id: 'p_20261025_education', uid: DEFAULT_USER_ID, subscriptionId: 'sub_education', amount: 22, date: '2026-10-25T00:00:00.000Z', status: 'paid', type: 'regular', note: 'Plan Yenilemesi' },
+  { id: 'p_20261024_netflix', uid: DEFAULT_USER_ID, subscriptionId: 'sub_netflix', amount: 21.27, date: '2026-10-24T00:00:00.000Z', status: 'paid', type: 'regular', note: 'Plan Yenilemesi' },
+  { id: 'p_20261024_apple_cloud', uid: DEFAULT_USER_ID, subscriptionId: 'sub_apple_cloud', amount: 2, date: '2026-10-24T00:00:00.000Z', status: 'paid', type: 'regular', note: 'Plan Yenilemesi' },
+  { id: 'p_20261023_gemini', uid: DEFAULT_USER_ID, subscriptionId: 'sub_gemini', amount: 6.99, date: '2026-10-23T00:00:00.000Z', status: 'paid', type: 'regular', note: 'Plan Yenilemesi' },
+  { id: 'p_20261023_youtube', uid: DEFAULT_USER_ID, subscriptionId: 'sub_youtube', amount: 27.99, date: '2026-10-23T00:00:00.000Z', status: 'paid', type: 'regular', note: 'Plan Yenilemesi' },
+  { id: 'p_20261015_digital_ocean', uid: DEFAULT_USER_ID, subscriptionId: 'sub_digital_ocean', amount: 10, date: '2026-10-15T00:00:00.000Z', status: 'paid', type: 'regular', note: 'Plan Yenilemesi' },
+  { id: 'p_20261014_cloud_do', uid: DEFAULT_USER_ID, subscriptionId: 'sub_cloud_do', amount: 12, date: '2026-10-14T00:00:00.000Z', status: 'paid', type: 'regular', note: 'Plan Yenilemesi' },
+  { id: 'p_20261005_claude', uid: DEFAULT_USER_ID, subscriptionId: 'sub_claude', amount: 31.36, date: '2026-10-05T00:00:00.000Z', status: 'paid', type: 'regular', note: 'Plan Yenilemesi' },
+  { id: 'p_20261003_openrouter', uid: DEFAULT_USER_ID, subscriptionId: 'sub_openrouter', amount: 10, date: '2026-10-03T00:00:00.000Z', status: 'paid', type: 'regular', note: 'Plan Yenilemesi' },
   { id: 'p_20261001_chatgpt', uid: DEFAULT_USER_ID, subscriptionId: 'sub_chatgpt', amount: 20, date: '2026-10-01T00:00:00.000Z', status: 'paid', type: 'regular', note: 'Plan Yenilemesi' },
   // 9/30/2026,Sep-26,Cloud Digital Ocean,Software,Aktif,Ek Harcama / Limit,4.03,USD,Ek Kredi / Token
   { id: 'p_20260930_cloud_do', uid: DEFAULT_USER_ID, subscriptionId: 'sub_cloud_do', amount: 4.03, date: '2026-09-30T00:00:00.000Z', status: 'paid', type: 'topup', note: 'Ek Kredi / Token' },
@@ -597,10 +613,70 @@ export const SEED_SAVINGS: SavingsTarget[] = [
 export const SEED_TAX_PROFILE: TaxProfile = {
   country: 'CA', // Default Canada, easily switchable to US, TR, EU, UK
   taxYear: 2026,
-  expectedAnnualTaxRefund: 2450, // Tahmini yıllık vergi iadesi
-  actualReceivedTaxRefund: 1800, // Şu ana kadar hesaba yatan
+  expectedAnnualTaxRefund: 2450, // Estimated annual tax refund
+  actualReceivedTaxRefund: 1800, // Amount received to date
   estimatedAnnualTaxPayable: 0,
-  deductibleExpensesEstimate: 3800, // RRSP, FHSA, Home Office vb. düşülebilir giderler
+  deductibleExpensesEstimate: 3800, // RRSP, FHSA, Home Office and eligible deductions
   taxPeriodReminderNote: 'Canada CRA Tax Return deadline: April 30 (Self-employed: June 15)'
 };
+
+export const SEED_TAX_YEAR_RECORDS: TaxYearRecord[] = [
+  {
+    id: 'tax_2026',
+    uid: DEFAULT_USER_ID,
+    year: 2026,
+    grossIncome: 94800,
+    deductibleExpenses: 11200, // RRSP, FHSA, home office, eligible expenses
+    taxPaid: 19850,
+    taxRefund: 2450,
+    effectiveTaxRate: 20.9,
+    status: 'pending',
+    filingDate: '2027-04-15',
+    note: '2026 tax year planning. RRSP contributions scheduled, CRA return will be filed before April 2027.',
+    updatedAt: '2026-10-14T10:00:00.000Z'
+  },
+  {
+    id: 'tax_2025',
+    uid: DEFAULT_USER_ID,
+    year: 2025,
+    grossIncome: 88500,
+    deductibleExpenses: 9500,
+    taxPaid: 18200,
+    taxRefund: 1800,
+    effectiveTaxRate: 20.5,
+    status: 'refund_received',
+    filingDate: '2026-04-12',
+    note: 'CRA T1 General return filed, $1,800 tax refund directly deposited to bank account.',
+    updatedAt: '2026-05-02T10:00:00.000Z'
+  },
+  {
+    id: 'tax_2024',
+    uid: DEFAULT_USER_ID,
+    year: 2024,
+    grossIncome: 79200,
+    deductibleExpenses: 8200,
+    taxPaid: 16400,
+    taxRefund: 2150,
+    effectiveTaxRate: 20.7,
+    status: 'filed',
+    filingDate: '2025-04-18',
+    note: 'All tax slips completed, medical and education deductions claimed.',
+    updatedAt: '2025-05-10T10:00:00.000Z'
+  },
+  {
+    id: 'tax_2023',
+    uid: DEFAULT_USER_ID,
+    year: 2023,
+    grossIncome: 71000,
+    deductibleExpenses: 6500,
+    taxPaid: 14900,
+    taxRefund: 1650,
+    effectiveTaxRate: 21.0,
+    status: 'filed',
+    filingDate: '2024-04-20',
+    note: 'Standard tax return and refund assessment successfully closed.',
+    updatedAt: '2024-05-15T10:00:00.000Z'
+  }
+];
+
 

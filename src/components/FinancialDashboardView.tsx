@@ -83,6 +83,9 @@ interface FinancialDashboardViewProps {
   onGoToRegularPayments: () => void;
   onOpenImportModal?: () => void;
   onOpenExportModal?: () => void;
+  onGoToIncomeSources?: () => void;
+  onGoToSavingsFunds?: () => void;
+  onGoToTaxCenter?: () => void;
 }
 
 export const FinancialDashboardView: React.FC<FinancialDashboardViewProps> = ({
@@ -105,7 +108,10 @@ export const FinancialDashboardView: React.FC<FinancialDashboardViewProps> = ({
   onGoToInstallments,
   onGoToRegularPayments,
   onOpenImportModal,
-  onOpenExportModal
+  onOpenExportModal,
+  onGoToIncomeSources,
+  onGoToSavingsFunds,
+  onGoToTaxCenter
 }) => {
   const { t, language } = useTranslation();
   const currentRegion = getTaxRegion(taxProfile.country, language);
@@ -116,6 +122,7 @@ export const FinancialDashboardView: React.FC<FinancialDashboardViewProps> = ({
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
   const [viewMode, setViewMode] = useState<'monthly' | 'annual'>('monthly');
+  const [distributionScope, setDistributionScope] = useState<'expenses' | 'all'>('expenses');
 
   const selectedDate = useMemo(() => {
     const [y, m] = selectedMonth.split('-').map(Number);
@@ -264,15 +271,33 @@ export const FinancialDashboardView: React.FC<FinancialDashboardViewProps> = ({
   const expectedTaxRefund = taxProfile.expectedAnnualTaxRefund || 0;
   const annualNetSavingsPotential = (annualTotalIncome - annualTotalExpenses) + expectedTaxRefund;
 
-  // Chart: Expense Breakdown Distribution
+  // Chart: Expense Breakdown Distribution (Aligned with ViewMode and Scope)
   const expenseDistributionData = useMemo(() => {
-    return [
-      { name: t('regularPaymentsTitle'), value: Number(monthlyRegularPaymentsExpense.toFixed(2)), color: '#f59e0b' },
-      { name: t('installmentPurchases'), value: Number(monthlyInstallmentsExpense.toFixed(2)), color: '#a855f7' },
-      { name: t('allSubscriptions'), value: Number(monthlySubscriptionsExpense.toFixed(2)), color: '#3b82f6' },
-      { name: t('monthlySavingsContribution'), value: Number(totalMonthlySavings.toFixed(2)), color: '#10b981' }
-    ].filter(item => item.value > 0);
-  }, [monthlyRegularPaymentsExpense, monthlyInstallmentsExpense, monthlySubscriptionsExpense, totalMonthlySavings, t]);
+    const mult = viewMode === 'annual' ? 12 : 1;
+    const items = [
+      { name: t('regularPaymentsTitle'), value: Number((monthlyRegularPaymentsExpense * mult).toFixed(2)), color: '#f59e0b' },
+      { name: t('installmentPurchases'), value: Number((monthlyInstallmentsExpense * mult).toFixed(2)), color: '#a855f7' },
+      { name: t('allSubscriptions'), value: Number((monthlySubscriptionsExpense * mult).toFixed(2)), color: '#3b82f6' }
+    ];
+
+    if (distributionScope === 'all') {
+      items.push({
+        name: t('monthlySavingsContribution'),
+        value: Number((totalMonthlySavings * mult).toFixed(2)),
+        color: '#10b981'
+      });
+    }
+
+    return items.filter(item => item.value > 0);
+  }, [monthlyRegularPaymentsExpense, monthlyInstallmentsExpense, monthlySubscriptionsExpense, totalMonthlySavings, viewMode, distributionScope, t]);
+
+  const expenseDistributionTotal = useMemo(() => {
+    const mult = viewMode === 'annual' ? 12 : 1;
+    if (distributionScope === 'all') {
+      return (totalMonthlyLivingExpense + totalMonthlySavings) * mult;
+    }
+    return totalMonthlyLivingExpense * mult;
+  }, [totalMonthlyLivingExpense, totalMonthlySavings, viewMode, distributionScope]);
 
   // Chart: Monthly Cash Flow (Income vs Expenses vs Savings)
   const cashFlowBarData = useMemo(() => {
@@ -337,15 +362,6 @@ export const FinancialDashboardView: React.FC<FinancialDashboardViewProps> = ({
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={onOpenTaxSettingsModal}
-            className="inline-flex items-center gap-2 px-4 py-3 bg-white dark:bg-gray-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-900/60 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 rounded-2xl font-bold text-xs sm:text-sm transition-all shadow-xs cursor-pointer"
-            title={t('configureTaxRefundGoal', 'Configure tax refund target and country tax calendar')}
-          >
-            <Landmark className="w-4 h-4 text-indigo-600" />
-            <span>{t('taxSettingsAndRefund')}</span>
-          </button>
 
           <button
             type="button"
@@ -427,8 +443,8 @@ export const FinancialDashboardView: React.FC<FinancialDashboardViewProps> = ({
         </div>
       </div>
 
-      {/* 2. Top Metric Cards: Gelir vs Gider vs Net vs Vergi İadesi */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* 2. Top Metric Cards: Gelir vs Gider vs Net Birikim */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
         {/* Card 1: Toplam Gelir (Aylık veya Yıllık) */}
         <div className="p-5 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-xs space-y-2">
           <div className="flex items-center justify-between">
@@ -491,84 +507,60 @@ export const FinancialDashboardView: React.FC<FinancialDashboardViewProps> = ({
             <span className="text-blue-600 font-bold">%{savingsRatePercent.toFixed(1)}</span>
           </div>
         </div>
-
-        {/* Card 4: Beklenen Yıllık Vergi İadesi */}
-        <div className="p-5 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-xs space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-gray-400">
-              {t('annualTaxRefund')} ({language === 'tr' ? (currentRegion.code === 'CA' ? 'Kanada' : currentRegion.countryName) : (currentRegion.code === 'CA' ? 'Canada' : currentRegion.code === 'US' ? 'USA' : currentRegion.countryName)})
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
-              <Landmark className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-2xl sm:text-3xl font-black text-indigo-600 dark:text-indigo-400">
-            +{formatCurrency(expectedTaxRefund, currencyCode)}
-          </p>
-          <div className="flex items-center justify-between text-[11px] text-gray-500 font-semibold pt-1">
-            <span>{formatCurrency(taxProfile.actualReceivedTaxRefund || 0, currencyCode)}</span>
-            <button
-              onClick={onOpenTaxSettingsModal}
-              className="text-indigo-600 hover:underline font-bold cursor-pointer"
-            >
-              {t('edit')}
-            </button>
-          </div>
-        </div>
       </div>
 
-      {/* 3. Country Tax Alert & Tax Season Reminder Banner */}
-      <div className="p-5 bg-gradient-to-r from-indigo-50 via-blue-50 to-purple-50 dark:from-indigo-950/30 dark:via-blue-950/20 dark:to-purple-950/20 rounded-3xl border border-indigo-200/70 dark:border-indigo-800/50 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex items-start gap-3.5">
-          <div className="w-11 h-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-indigo-600/25 text-xl">
-            {currentRegion.flag}
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="font-extrabold text-base text-gray-900 dark:text-white">
-                {currentRegion.countryName} - {taxProfile.taxYear} {t('taxSeasonReminder')}
-              </h3>
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-200/70 dark:bg-indigo-900/60 text-indigo-900 dark:text-indigo-200">
-                {t('taxAuthority')}: {currentRegion.taxAuthority}
-              </span>
-            </div>
-            <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
-              <strong>{t('filingDeadline')}:</strong> {currentRegion.filingDeadline} • <strong>{t('refundPeriod')}:</strong> {currentRegion.refundPeriod}
-            </p>
-            {taxProfile.taxPeriodReminderNote && (
-              <p className="text-xs text-indigo-800 dark:text-indigo-300 font-semibold mt-1 bg-white/60 dark:bg-gray-900/60 p-2 rounded-xl border border-indigo-100 dark:border-indigo-900/40">
-                📌 {getLocalizedNote(taxProfile.taxPeriodReminderNote, language)}
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 self-start md:self-auto shrink-0">
-          <button
-            type="button"
-            onClick={onOpenTaxSettingsModal}
-            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition-all shadow-sm cursor-pointer"
-          >
-            {t('taxSettingsAndRefund')}
-          </button>
-        </div>
-      </div>
-
-      {/* 4. Visual Financial Flow Charts */}
+      {/* 3. Visual Financial Flow Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Monthly Gider Dağılımı (Pie Chart) */}
         <div className="p-6 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-xs space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
               <h2 className="text-base font-extrabold text-gray-900 dark:text-white flex items-center gap-2">
                 <Layers className="w-4 h-4 text-amber-500" />
-                {t('expenseAndSavingsDistribution')}
+                {distributionScope === 'expenses' ? (language === 'tr' ? 'Aylık Gider Dağılımı' : 'Monthly Expense Breakdown') : t('expenseAndSavingsDistribution')}
               </h2>
-              <p className="text-[11px] text-gray-500">{t('dashboardSubtitle')}</p>
+              <p className="text-[11px] text-gray-500">
+                {distributionScope === 'expenses'
+                  ? (viewMode === 'monthly' ? `${t('monthlyTotalExpenses')}: ${formatCurrency(totalMonthlyLivingExpense, currencyCode)}` : `${t('annualTotalExpenses')}: ${formatCurrency(annualTotalExpenses, currencyCode)}`)
+                  : (language === 'tr' ? 'Tüm Giderler ve Aylık Birikim Hedefleri' : 'All Expenses and Savings Targets')}
+              </p>
             </div>
-            <span className="text-xs font-black text-gray-900 dark:text-white">
-              {formatCurrency(totalMonthlyLivingExpense + totalMonthlySavings, currencyCode)}{t('perMonth', '/mo')}
-            </span>
+            <div className="text-right">
+              <span className="text-xs font-black text-gray-900 dark:text-white block">
+                {formatCurrency(expenseDistributionTotal, currencyCode)}{viewMode === 'monthly' ? t('perMonth', '/mo') : (language === 'tr' ? '/yıl' : '/yr')}
+              </span>
+              <span className="text-[10px] font-bold text-gray-400">
+                {distributionScope === 'expenses' ? t('expensesOnly') : t('expensesAndSavings')}
+              </span>
+            </div>
+          </div>
+
+          {/* Scope Selector: Sadece Giderler vs Giderler + Birikim */}
+          <div className="flex items-center gap-1.5 p-1 bg-gray-100 dark:bg-gray-800/80 rounded-xl text-[11px] font-bold">
+            <button
+              type="button"
+              onClick={() => setDistributionScope('expenses')}
+              className={cn(
+                "flex-1 py-1.5 px-2 rounded-lg transition-all cursor-pointer text-center",
+                distributionScope === 'expenses'
+                  ? "bg-white dark:bg-gray-700 text-amber-700 dark:text-amber-300 font-extrabold shadow-xs"
+                  : "text-gray-500 hover:text-gray-900 dark:hover:text-gray-200"
+              )}
+            >
+              {t('expensesOnly')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDistributionScope('all')}
+              className={cn(
+                "flex-1 py-1.5 px-2 rounded-lg transition-all cursor-pointer text-center",
+                distributionScope === 'all'
+                  ? "bg-white dark:bg-gray-700 text-emerald-700 dark:text-emerald-300 font-extrabold shadow-xs"
+                  : "text-gray-500 hover:text-gray-900 dark:hover:text-gray-200"
+              )}
+            >
+              {t('expensesAndSavings')}
+            </button>
           </div>
 
           <div className="h-[220px] w-full">
@@ -691,273 +683,229 @@ export const FinancialDashboardView: React.FC<FinancialDashboardViewProps> = ({
         </div>
       </div>
 
-      {/* 5. Incomes List & Savings Targets Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Left: Gelir Kaynakları */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-xl font-bold flex items-center gap-2 dark:text-white">
-                <Briefcase className="w-5 h-5 text-emerald-600" />
-                <span>{t('monthlyIncomeSources')}</span>
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-extrabold">
-                  {incomes.length}
+      {/* 5. Clean Dashboard Summary: Monthly Income Sources & Saving Target Funds */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left: Monthly Income Sources Summary Widget */}
+        <div className="p-6 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-xs space-y-4 hover:border-emerald-200 dark:hover:border-emerald-900/40 transition-all flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
+                  <TrendingUp className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-extrabold flex items-center gap-2 text-gray-900 dark:text-white">
+                    <span>{t('monthlyIncomeSources')}</span>
+                    <span className="text-xs px-2 py-0.2 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-extrabold">
+                      {incomes.length}
+                    </span>
+                  </h2>
+                  <p className="text-[11px] text-gray-400 font-medium">
+                    {language === 'tr' ? 'Maaş, serbest çalışma, temettü ve ek kazançlar' : 'Salary, freelance, dividends & extra earnings'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={onOpenAddIncomeModal}
+                className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 dark:text-emerald-300 rounded-xl text-xs font-bold transition-all cursor-pointer border border-emerald-200/60 dark:border-emerald-800/40"
+              >
+                <Plus className="w-3.5 h-3.5 text-emerald-600" />
+                <span>{language === 'tr' ? '+ Gelir Ekle' : '+ Add'}</span>
+              </button>
+            </div>
+
+            {/* Income Highlights Bar */}
+            <div className="grid grid-cols-2 gap-3 mt-4">
+              <div className="p-3 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-2xl border border-emerald-100 dark:border-emerald-900/30">
+                <span className="text-[10px] font-extrabold uppercase text-emerald-800 dark:text-emerald-300 tracking-wider">
+                  {selectedMonthName} {language === 'tr' ? 'Brüt Gelir' : 'Gross'}
                 </span>
-              </h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                {t('monthlyTotalIncome')}: <strong className="text-emerald-600 dark:text-emerald-400 font-extrabold">{formatCurrency(selectedMonthIncome, currencyCode)}</strong> ({selectedMonthName})
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onOpenAddIncomeModal}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition-all shadow-sm cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>{t('addIncome')}</span>
-            </button>
-          </div>
+                <p className="text-lg font-black text-emerald-700 dark:text-emerald-300 mt-0.5">
+                  +{formatCurrency(selectedMonthIncome, currencyCode)}
+                </p>
+              </div>
 
-          {/* 12-Month Interactive Trend Bar & Month Selector */}
-          <div className="p-3.5 bg-white dark:bg-gray-900 rounded-2xl border border-emerald-100 dark:border-emerald-900/40 shadow-xs space-y-2">
-            <div className="flex items-center justify-between text-xs font-bold text-gray-700 dark:text-gray-300">
-              <span className="flex items-center gap-1.5">
-                <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
-                <span>{language === 'tr' ? 'Aylara Göre Değişen Gelir Dağılımı' : 'Monthly Income Distribution'}</span>
+              <div className="p-3 bg-gray-50 dark:bg-gray-800/40 rounded-2xl border border-gray-100 dark:border-gray-800">
+                <span className="text-[10px] font-extrabold uppercase text-gray-400 tracking-wider">
+                  {language === 'tr' ? 'Tahmini Net Gelir' : 'Est. Net Income'}
+                </span>
+                <p className="text-lg font-black text-gray-900 dark:text-white mt-0.5">
+                  +{formatCurrency(Math.max(0, selectedMonthIncome * 0.78), currencyCode)}
+                </p>
+              </div>
+            </div>
+
+            {/* Top Incomes Preview List */}
+            <div className="mt-4 space-y-2">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-gray-400">
+                {language === 'tr' ? 'Kayıtlı Gelir Kaynakları Özeti' : 'Income Sources Preview'}
               </span>
-              <span className="text-[11px] text-emerald-700 dark:text-emerald-300 font-extrabold">
-                {selectedMonthName}: {formatCurrency(selectedMonthIncome, currencyCode)}
-              </span>
-            </div>
-            <div className="grid grid-cols-6 sm:grid-cols-12 gap-1 pt-1">
-              {yearMonthlyIncomes.map((m) => (
-                <button
-                  key={m.monthKey}
-                  type="button"
-                  onClick={() => setSelectedMonth(m.monthKey)}
-                  className={cn(
-                    "flex flex-col items-center justify-center py-2 px-1 rounded-xl text-center transition-all cursor-pointer border text-[11px]",
-                    m.isSelected
-                      ? "bg-emerald-600 text-white border-emerald-600 font-black shadow-xs scale-105"
-                      : "bg-gray-50 dark:bg-gray-800/60 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-gray-700 dark:text-gray-300 border-gray-100 dark:border-gray-800 font-semibold"
-                  )}
-                  title={`${m.label}: ${formatCurrency(m.amount, currencyCode)}`}
-                >
-                  <span className="text-[10px] uppercase font-bold">{m.label}</span>
-                  <span className={cn("text-[9px] mt-0.5 truncate max-w-full font-extrabold", m.isSelected ? "text-white" : "text-emerald-600 dark:text-emerald-400")}>
-                    {m.amount > 0 ? formatCurrency(m.amount, currencyCode).replace(/\.\d+/, '') : '-'}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
 
-          <div className="space-y-3">
-            {incomes.length > 0 ? (
-              incomes.map((inc) => {
-                const [, mStr] = selectedMonth.split('-');
-                const monthNum = parseInt(mStr, 10) || 1;
-                let thisMonthAmount = inc.amount;
-                if (inc.frequency === 'biweekly') {
-                  thisMonthAmount = (inc.amount * 26) / 12;
-                } else if (inc.frequency === 'annual') {
-                  if (inc.annualPayoutMonth) {
-                    thisMonthAmount = inc.annualPayoutMonth === monthNum ? inc.amount : 0;
-                  } else {
-                    thisMonthAmount = inc.amount / 12;
-                  }
-                } else if (inc.frequency === 'irregular' && inc.targetMonth) {
-                  thisMonthAmount = inc.targetMonth === selectedMonth ? inc.amount : 0;
-                }
-
-                return (
+              {incomes.length > 0 ? (
+                incomes.slice(0, 3).map((inc) => (
                   <div
                     key={inc.id}
-                    className="p-4 bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-xs flex items-center justify-between gap-3 hover:border-emerald-200 dark:hover:border-emerald-900/40 transition-all"
+                    className="p-2.5 bg-gray-50/80 dark:bg-gray-800/40 rounded-xl flex items-center justify-between text-xs border border-gray-100 dark:border-gray-800/60"
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
-                        <DollarSign className="w-5 h-5" />
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-100/70 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 flex items-center justify-center shrink-0 font-bold text-xs">
+                        <DollarSign className="w-3.5 h-3.5" />
                       </div>
-                      <div>
-                        <h4 className="font-extrabold text-sm text-gray-900 dark:text-white">{translateTitle(inc.name, language)}</h4>
-                        <p className="text-[11px] text-gray-500">
-                          {inc.frequency === 'biweekly' 
-                            ? t('biweekly', 'Every 2 Weeks') 
-                            : inc.frequency === 'annual' 
-                            ? (inc.annualPayoutMonth ? `${t('annual', 'Annual')} (${inc.annualPayoutMonth}. ${language === 'tr' ? 'Ay' : 'Month'})` : t('annual', 'Annual'))
-                            : inc.frequency === 'irregular' && inc.targetMonth
-                            ? `${language === 'tr' ? 'Dönemsel' : 'Irregular'} (${inc.targetMonth})`
-                            : t('monthlyRegular', 'Monthly Regular')}
-                          {inc.receivedDay ? ` • ${t('dayOfMonth', 'Day {day} of month').replace('{day}', String(inc.receivedDay))}` : ''}
+                      <div className="truncate">
+                        <p className="font-extrabold text-gray-900 dark:text-white truncate">
+                          {translateTitle(inc.name, language)}
+                        </p>
+                        <p className="text-[10px] text-gray-400">
+                          {inc.frequency === 'biweekly' ? t('biweekly') : inc.frequency === 'annual' ? t('annual') : t('monthlyRegular')}
                         </p>
                       </div>
                     </div>
+                    <span className="font-black text-emerald-600 dark:text-emerald-400 shrink-0">
+                      +{formatCurrency(inc.amount, currencyCode)}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="p-4 text-center text-xs text-gray-400 italic bg-gray-50 dark:bg-gray-800/30 rounded-xl">
+                  {language === 'tr' ? 'Henüz gelir kaynağı eklenmedi.' : 'No income sources added yet.'}
+                </div>
+              )}
+            </div>
+          </div>
 
-                    <div className="flex items-center gap-3">
-                      <div className="text-right">
-                        <p className="font-black text-sm text-emerald-600 dark:text-emerald-400">
-                          +{formatCurrency(thisMonthAmount, currencyCode)}
-                        </p>
-                        <p className="text-[10px] text-gray-400 uppercase font-bold">
-                          {inc.frequency === 'annual' && inc.annualPayoutMonth
-                            ? (inc.annualPayoutMonth === monthNum ? (language === 'tr' ? 'Bu Ay Ödenir' : 'Paid This Month') : (language === 'tr' ? 'Bu Ay Yok' : 'None This Month'))
-                            : inc.frequency === 'annual'
-                            ? (language === 'tr' ? 'Aylık Pay' : 'Monthly Share')
-                            : inc.frequency === 'irregular' && inc.targetMonth
-                            ? (inc.targetMonth === selectedMonth ? (language === 'tr' ? 'Bu Ay Ödenir' : 'Paid This Month') : (language === 'tr' ? 'Bu Ay Yok' : 'None This Month'))
-                            : inc.isRegular ? t('guaranteedIncome', 'Guaranteed Income') : t('variableIncome', 'Variable Income')}
-                        </p>
-                      </div>
+          {/* Full Page Link */}
+          {onGoToIncomeSources && (
+            <button
+              type="button"
+              onClick={onGoToIncomeSources}
+              className="w-full mt-2 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-emerald-600/20 flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <span>{language === 'tr' ? 'Aylık Gelirleri Yönet & Yeni Kazanç Ekle' : 'Manage Monthly Incomes & Add Earnings'}</span>
+              <ArrowUpRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
 
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => onEditIncome(inc)}
-                        className="p-1.5 text-gray-400 hover:text-emerald-600 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors cursor-pointer"
-                        title={t('edit', 'Edit')}
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onDeleteIncome(inc.id)}
-                        className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer"
-                        title={t('delete', 'Delete')}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+        {/* Right: Saving & Target Funds Summary Widget */}
+        <div className="p-6 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-xs space-y-4 hover:border-blue-200 dark:hover:border-blue-900/40 transition-all flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
+                  <PiggyBank className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-extrabold flex items-center gap-2 text-gray-900 dark:text-white">
+                    <span>{t('savingsTargets')}</span>
+                    <span className="text-xs px-2 py-0.2 rounded-full bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 font-extrabold">
+                      {savings.length}
+                    </span>
+                  </h2>
+                  <p className="text-[11px] text-gray-400 font-medium">
+                    {language === 'tr' ? 'Acil durum, ev, tatil ve birikim hedefleri' : 'Emergency fund, home, travel & savings goals'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={onOpenAddSavingsModal}
+                className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:hover:bg-blue-900/60 dark:text-blue-300 rounded-xl text-xs font-bold transition-all cursor-pointer border border-blue-200/60 dark:border-blue-800/40"
+              >
+                <Plus className="w-3.5 h-3.5 text-blue-600" />
+                <span>{language === 'tr' ? '+ Hedef Ekle' : '+ Add'}</span>
+              </button>
+            </div>
+
+            {/* Savings Progress Bar */}
+            {(() => {
+              const totalTargetVal = savings.reduce((acc, s) => acc + (s.targetAmount || 0), 0);
+              const totalCurrentVal = savings.reduce((acc, s) => acc + (s.currentAmount || 0), 0);
+              const overallPct = totalTargetVal > 0 ? Math.min(100, Math.round((totalCurrentVal / totalTargetVal) * 100)) : 0;
+              const monthlyPace = savings.reduce((acc, s) => acc + (s.monthlyContribution || 0), 0);
+
+              return (
+                <div className="mt-4 p-3.5 bg-blue-50/50 dark:bg-blue-950/20 rounded-2xl border border-blue-100 dark:border-blue-900/30 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-extrabold text-blue-900 dark:text-blue-200">
+                      {formatCurrency(totalCurrentVal, currencyCode)}
+                    </span>
+                    <span className="font-bold text-gray-400">
+                      / {formatCurrency(totalTargetVal, currencyCode)} ({overallPct}%)
+                    </span>
+                  </div>
+
+                  <div className="w-full h-2 bg-blue-100/80 dark:bg-gray-800 rounded-full overflow-hidden">
+                    <div
+                      style={{ width: `${overallPct}%` }}
+                      className="h-full bg-blue-600 rounded-full transition-all duration-500"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400 font-semibold pt-0.5">
+                    <span>{language === 'tr' ? 'Aylık Ayrılan Birikim:' : 'Monthly Savings Allocation:'}</span>
+                    <strong className="text-blue-600 dark:text-blue-400 font-extrabold">
+                      {formatCurrency(monthlyPace, currencyCode)}/ay
+                    </strong>
                   </div>
                 </div>
               );
-            })
-            ) : (
-              <div className="p-8 text-center bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800">
-                <Briefcase className="w-10 h-10 text-gray-300 mx-auto mb-2" />
-                <p className="text-xs text-gray-500 font-bold">{t('noIncomeSourcesYet', 'No income sources recorded yet.')}</p>
-                <button
-                  type="button"
-                  onClick={onOpenAddIncomeModal}
-                  className="mt-3 px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer"
-                >
-                  {t('addFirstIncome', 'Add Your First Income')}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+            })()}
 
-        {/* Right: Para Biriktirme & Tasarruf Hedefleri */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-xl font-bold flex items-center gap-2 dark:text-white">
-                <PiggyBank className="w-5 h-5 text-blue-600" />
-                <span>{t('savingsTargets')}</span>
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 font-extrabold">
-                  {savings.length}
-                </span>
-              </h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                {t('monthlySavingsContribution')}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onOpenAddSavingsModal}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-all shadow-sm cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>{t('addSavingsTarget')}</span>
-            </button>
-          </div>
+            {/* Top Savings Preview List */}
+            <div className="mt-4 space-y-2">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-gray-400">
+                {language === 'tr' ? 'Öne Çıkan Hedef Fonları' : 'Featured Savings Funds'}
+              </span>
 
-          <div className="space-y-3">
-            {savings.length > 0 ? (
-              savings.map((sav) => {
-                const target = sav.targetAmount || 1;
-                const current = sav.currentAmount || 0;
-                const percent = Math.min(100, Math.round((current / target) * 100));
-
-                return (
-                  <div
-                    key={sav.id}
-                    className="p-4 bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-xs space-y-2.5 hover:border-blue-200 dark:hover:border-blue-900/40 transition-all"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
-                          <Target className="w-4 h-4" />
+              {savings.length > 0 ? (
+                savings.slice(0, 3).map((sav) => {
+                  const pct = Math.min(100, Math.round(((sav.currentAmount || 0) / (sav.targetAmount || 1)) * 100));
+                  return (
+                    <div
+                      key={sav.id}
+                      className="p-2.5 bg-gray-50/80 dark:bg-gray-800/40 rounded-xl flex items-center justify-between text-xs border border-gray-100 dark:border-gray-800/60"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-7 h-7 rounded-lg bg-blue-100/70 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 flex items-center justify-center shrink-0 font-bold text-xs">
+                          <Target className="w-3.5 h-3.5" />
                         </div>
-                        <div>
-                          <h4 className="font-extrabold text-sm text-gray-900 dark:text-white">{translateTitle(sav.title, language)}</h4>
-                          <p className="text-[11px] text-gray-500">
-                            {t('monthlySavingsContribution')}: <strong className="text-blue-600">{formatCurrency(sav.monthlyContribution, currencyCode)}{t('perMonth', '/mo')}</strong>
-                            {sav.deadline ? ` • ${sav.deadline}` : ''}
+                        <div className="truncate">
+                          <p className="font-extrabold text-gray-900 dark:text-white truncate">
+                            {translateTitle(sav.title, language)}
+                          </p>
+                          <p className="text-[10px] text-gray-400">
+                            {formatCurrency(sav.currentAmount || 0, currencyCode)} / {formatCurrency(sav.targetAmount || 0, currencyCode)}
                           </p>
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-2">
-                        <div className="text-right">
-                          <span className="text-xs font-black text-gray-900 dark:text-white">
-                            {formatCurrency(current, currencyCode)}
-                          </span>
-                          <span className="text-[10px] text-gray-400 block font-bold">
-                            / {formatCurrency(target, currencyCode)}
-                          </span>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => onEditSavings(sav)}
-                          className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors cursor-pointer"
-                          title={t('edit')}
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onDeleteSavings(sav.id)}
-                          className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer"
-                          title={t('delete')}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      <span className="font-black text-blue-600 dark:text-blue-400 shrink-0 text-xs">
+                        %{pct}
+                      </span>
                     </div>
-
-                    {/* Progress Bar */}
-                    <div className="space-y-1">
-                      <div className="w-full h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-                        <div
-                          style={{ width: `${percent}%` }}
-                          className="h-full bg-blue-600 rounded-full transition-all duration-500"
-                        />
-                      </div>
-                      <div className="flex justify-between items-center text-[10px] text-gray-400 font-bold">
-                        <span>%{percent}</span>
-                        <span>{formatCurrency(Math.max(0, target - current), currencyCode)}</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="p-8 text-center bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800">
-                <PiggyBank className="w-10 h-10 text-gray-300 mx-auto mb-2" />
-                <p className="text-xs text-gray-500 font-bold">{t('noSavingsTargetsYet', 'No savings targets registered yet.')}</p>
-                <button
-                  type="button"
-                  onClick={onOpenAddSavingsModal}
-                  className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold cursor-pointer"
-                >
-                  {t('addSavingsTarget')}
-                </button>
-              </div>
-            )}
+                  );
+                })
+              ) : (
+                <div className="p-4 text-center text-xs text-gray-400 italic bg-gray-50 dark:bg-gray-800/30 rounded-xl">
+                  {language === 'tr' ? 'Henüz birikim hedefi eklenmedi.' : 'No savings goals added yet.'}
+                </div>
+              )}
+            </div>
           </div>
+
+          {/* Full Page Link */}
+          {onGoToSavingsFunds && (
+            <button
+              type="button"
+              onClick={onGoToSavingsFunds}
+              className="w-full mt-2 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-blue-600/20 flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <span>{language === 'tr' ? 'Birikim Fonlarını Yönet & Hedef Belirle' : 'Manage Savings Funds & Goals'}</span>
+              <ArrowUpRight className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 

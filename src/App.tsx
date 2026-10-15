@@ -30,7 +30,10 @@ import {
   Upload,
   AlertTriangle,
   Calendar,
-  RotateCcw
+  RotateCcw,
+  Receipt,
+  ShoppingBag,
+  Layers
 } from 'lucide-react';
 import { 
   collection, 
@@ -67,12 +70,15 @@ import {
 } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, auth } from './firebase';
-import { UserProfile, Subscription, Payment, Installment, RegularPayment, IncomeItem, SavingsTarget, TaxProfile, OperationType, FirestoreErrorInfo } from './types';
+import { UserProfile, Subscription, Payment, Installment, RegularPayment, IncomeItem, SavingsTarget, TaxProfile, TaxYearRecord, OperationType, FirestoreErrorInfo } from './types';
 import { AuthContext } from './context/AuthContext';
 import { useTranslation } from './context/LanguageContext';
 import { formatCurrency, getCurrencySymbol, isDemoItem, COLORS } from './constants';
 import { getLocalizedCategoryName } from './utils/categoryTranslator';
-import { Navbar } from './components/Navbar';
+import { Navbar, MainNavTab } from './components/Navbar';
+import { AppSidebar } from './components/AppSidebar';
+import { AppHeader } from './components/AppHeader';
+import { NotificationSettingsModal } from './components/NotificationSettingsModal';
 import { SubscriptionCard } from './components/SubscriptionCard';
 import { PaymentHistoryModal } from './components/PaymentHistoryModal';
 import { QuickAddPaymentModal } from './components/QuickAddPaymentModal';
@@ -85,16 +91,19 @@ import { ConfirmationModal } from './components/ConfirmationModal';
 import { AddEditModal } from './components/AddEditModal';
 import { AuthModal } from './components/AuthModal';
 import { InstallmentsView } from './components/InstallmentsView';
-import { UpcomingInstallmentsWidget } from './components/UpcomingInstallmentsWidget';
 import { AddEditInstallmentModal } from './components/AddEditInstallmentModal';
 import { RegularPaymentsView } from './components/RegularPaymentsView';
 import { AddEditRegularPaymentModal } from './components/AddEditRegularPaymentModal';
 import { FinancialDashboardView } from './components/FinancialDashboardView';
+import { MonthlyIncomeSourcesView } from './components/MonthlyIncomeSourcesView';
+import { SavingsTargetFundsView } from './components/SavingsTargetFundsView';
+import { TaxCenterView } from './components/TaxCenterView';
+import { SettingsView } from './components/SettingsView';
 import { AddEditIncomeModal } from './components/AddEditIncomeModal';
 import { AddEditSavingsModal } from './components/AddEditSavingsModal';
 import { TaxSettingsModal } from './components/TaxSettingsModal';
 import { normalizeCountryCode } from './constants/taxRegions';
-import { SEED_SUBSCRIPTIONS, SEED_PAYMENTS, DEFAULT_PROFILE, SEED_INSTALLMENTS, HONDA_PILOT_INSTALLMENT, SEED_REGULAR_PAYMENTS, SEED_INCOMES, SEED_SAVINGS, SEED_TAX_PROFILE } from './data/seedData';
+import { SEED_SUBSCRIPTIONS, SEED_PAYMENTS, DEFAULT_PROFILE, SEED_INSTALLMENTS, HONDA_PILOT_INSTALLMENT, SEED_REGULAR_PAYMENTS, SEED_INCOMES, SEED_SAVINGS, SEED_TAX_PROFILE, SEED_TAX_YEAR_RECORDS } from './data/seedData';
 import {
   syncEventToGoogleCalendar,
   deleteGoogleCalendarEvent,
@@ -225,9 +234,13 @@ export default function App() {
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
   const [isScanningStorage, setIsScanningStorage] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [trendFilter, setTrendFilter] = useState<'subscriptions' | 'all' | 'regular' | 'installments'>('subscriptions');
+  const [trendMode, setTrendMode] = useState<'actual' | 'planned'>('actual');
 
-  // Navigation & Management State (Dashboard, Subscriptions, Installments, RegularPayments)
-  const [activeMainTab, setActiveMainTab] = useState<'dashboard' | 'subscriptions' | 'installments' | 'regularPayments'>('dashboard');
+  // Navigation & Management State (Dashboard, Subscriptions, Installments, RegularPayments, IncomeSources, SavingsFunds)
+  const [activeMainTab, setActiveMainTab] = useState<MainNavTab>('dashboard');
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isNotificationSettingsOpen, setIsNotificationSettingsOpen] = useState(false);
 
   // Incomes State
   const [incomes, setIncomes] = useState<IncomeItem[]>(() => {
@@ -305,6 +318,67 @@ export default function App() {
       localStorage.setItem('subtrack_tax_profile', JSON.stringify(taxProfile));
     } catch {}
   }, [taxProfile]);
+
+  // Tax Year Records State (Annual records for multi-year tracking)
+  const [taxYearRecords, setTaxYearRecords] = useState<TaxYearRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('subtrack_tax_year_records');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return SEED_TAX_YEAR_RECORDS;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('subtrack_tax_year_records', JSON.stringify(taxYearRecords));
+    } catch {}
+  }, [taxYearRecords]);
+
+  const handleSaveTaxYearRecord = (record: TaxYearRecord) => {
+    setTaxYearRecords(prev => {
+      const exists = prev.some(r => r.id === record.id);
+      if (exists) {
+        return prev.map(r => r.id === record.id ? record : r);
+      }
+      return [record, ...prev];
+    });
+  };
+
+  const handleDeleteTaxYearRecord = (id: string) => {
+    setTaxYearRecords(prev => prev.filter(r => r.id !== id));
+  };
+
+  const handleUpdateProfile = (updated: Partial<UserProfile>) => {
+    setProfile(prev => {
+      const merged = prev ? { ...prev, ...updated } : { ...DEFAULT_PROFILE, ...updated };
+      try {
+        localStorage.setItem('subtrack_user_profile', JSON.stringify(merged));
+      } catch {}
+      return merged;
+    });
+
+    if (updated.displayName || updated.email || updated.photoURL) {
+      setUser((prev: any) => {
+        const nextUser = {
+          ...prev,
+          displayName: updated.displayName ?? prev?.displayName,
+          email: updated.email ?? prev?.email,
+          photoURL: updated.photoURL ?? prev?.photoURL
+        };
+        try {
+          localStorage.setItem('subtrack_local_user', JSON.stringify(nextUser));
+        } catch {}
+        return nextUser;
+      });
+    }
+
+    if (user?.uid) {
+      setDoc(doc(db, 'users', user.uid), updated, { merge: true }).catch(() => {});
+    }
+  };
 
   const [installments, setInstallments] = useState<Installment[]>(() => {
     try {
@@ -811,17 +885,61 @@ export default function App() {
         setDoc(doc(db, 'regularPayments', id), updatedPayment, { merge: true }).catch(() => {});
       }
 
-      // Turn Google Calendar event green if synced
+      // Turn Google Calendar event green (colorId: 10 - Basil) for due auto/manual payment
       const token = getCachedAccessToken();
       const targetCalId = profile?.calendarSettings?.calendarId || 'primary';
-      if (token && target.calendarEventId) {
-        await markRegularPaymentEventPaidInGoogleCalendar(token, targetCalId, {
-          eventId: target.calendarEventId,
-          name: target.name,
-          amount: target.amount,
-          currency: profile?.currency || 'USD',
-          payee: target.payee
-        }).catch(() => {});
+      if (token) {
+        try {
+          const paidEventId = await markRegularPaymentEventPaidInGoogleCalendar(token, targetCalId, {
+            eventId: target.calendarEventId,
+            name: target.name,
+            amount: target.amount,
+            currency: profile?.currency || 'USD',
+            payee: target.payee,
+            dueDate: target.nextPaymentDate,
+            isAutoPayment: target.isAutoPayment
+          });
+
+          // Also schedule the upcoming next month event on Google Calendar so it is tracked in orange
+          if (paidEventId || profile?.calendarSettings?.autoSync) {
+            try {
+              const nextMonthResult = await syncRegularPaymentToGoogleCalendar(
+                token,
+                targetCalId,
+                {
+                  id: target.id,
+                  name: target.name,
+                  category: target.category,
+                  payee: target.payee,
+                  amount: target.amount,
+                  currency: profile?.currency || 'USD',
+                  nextPaymentDate: nextDate,
+                  isAutoPayment: target.isAutoPayment,
+                  bankOrCard: target.bankOrCard,
+                  accountOrSubscriberNo: target.accountOrSubscriberNo,
+                  note: target.note,
+                  isPaid: false
+                }
+              );
+
+              if (nextMonthResult?.eventId) {
+                const finalPayment: RegularPayment = {
+                  ...updatedPayment,
+                  calendarEventId: nextMonthResult.eventId,
+                  calendarSyncedAt: new Date().toISOString()
+                };
+                setRegularPayments(prev => prev.map(p => p.id === id ? finalPayment : p));
+                if (user) {
+                  setDoc(doc(db, 'regularPayments', id), finalPayment, { merge: true }).catch(() => {});
+                }
+              }
+            } catch (nextErr) {
+              console.warn('Could not schedule next month calendar event:', nextErr);
+            }
+          }
+        } catch (gcalErr) {
+          console.warn('Google Calendar update error on payment:', gcalErr);
+        }
       }
     } finally {
       setPayingRegularPaymentId(null);
@@ -900,6 +1018,11 @@ export default function App() {
 
     setSyncingCalendarPaymentId(payment.id);
     try {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const curMonth = format(new Date(), 'yyyy-MM');
+      const isDueOrPast = Boolean(payment.nextPaymentDate && payment.nextPaymentDate <= todayStr);
+      const isPaid = Boolean(payment.lastPaidMonth === curMonth || (payment.isAutoPayment && isDueOrPast));
+
       const targetCalId = profile?.calendarSettings?.calendarId || 'primary';
       const result = await syncRegularPaymentToGoogleCalendar(
         token,
@@ -915,7 +1038,8 @@ export default function App() {
           isAutoPayment: payment.isAutoPayment,
           bankOrCard: payment.bankOrCard,
           accountOrSubscriberNo: payment.accountOrSubscriberNo,
-          note: payment.note
+          note: payment.note,
+          isPaid
         },
         payment.calendarEventId
       );
@@ -1294,113 +1418,142 @@ export default function App() {
     checkNotifications();
   }, [user, profile, subscriptions]);
 
-  // Auto-record payments for recurring subscriptions
+  // Auto-record payments for recurring subscriptions, installments, and regular payments
   const isAutoRecordingRef = useRef(false);
   const autoRecordPayments = async () => {
-    if (!user || subscriptions.length === 0 || isAutoRecordingRef.current) return;
+    if (isAutoRecordingRef.current) return;
     isAutoRecordingRef.current = true;
     try {
       const now = new Date();
+      const curMonthStr = format(now, 'yyyy-MM');
+      const token = getCachedAccessToken();
+      const targetCalId = profile?.calendarSettings?.calendarId || 'primary';
       
-      for (const sub of subscriptions) {
-        if (sub.status === 'cancelled') continue;
-        if (sub.pricingType === 'usage_based') continue;
+      // 1. Subscriptions auto-payment & auto-renewal
+      if (subscriptions && subscriptions.length > 0) {
+        for (const sub of subscriptions) {
+          if (sub.status === 'cancelled') continue;
+          if (sub.pricingType === 'usage_based') continue;
 
-        let currentNextDateString = sub.nextPaymentDate;
-        let nextPaymentDate = parseISO(currentNextDateString);
-        let updated = false;
+          let currentNextDateString = sub.nextPaymentDate;
+          let nextPaymentDate = parseISO(currentNextDateString);
+          let updated = false;
 
-        const existingMonthKeys = new Set<string>();
-        try {
-          const paymentsRef = collection(db, 'subscriptions', sub.id, 'payments');
-          const snap = await getDocs(query(paymentsRef, where('uid', '==', user.uid)));
-          snap.forEach(d => {
-            const data = d.data();
-            if (data.date && (!data.type || data.type === 'regular')) {
-              try {
-                existingMonthKeys.add(format(parseISO(data.date), 'yyyy-MM'));
-              } catch {
-                // ignore
+          const existingMonthKeys = new Set<string>();
+          if (user) {
+            try {
+              const paymentsRef = collection(db, 'subscriptions', sub.id, 'payments');
+              const snap = await getDocs(query(paymentsRef, where('uid', '==', user.uid)));
+              snap.forEach(d => {
+                const data = d.data();
+                if (data.date && (!data.type || data.type === 'regular')) {
+                  try {
+                    existingMonthKeys.add(format(parseISO(data.date), 'yyyy-MM'));
+                  } catch {
+                    // ignore
+                  }
+                }
+              });
+            } catch (e) {
+              console.error(`Failed to check existing payments for ${sub.name}:`, e);
+            }
+          }
+          
+          while (differenceInCalendarDays(now, nextPaymentDate) >= 0) {
+            const paymentMonthKey = format(nextPaymentDate, 'yyyy-MM');
+            if (!existingMonthKeys.has(paymentMonthKey)) {
+              if (user) {
+                try {
+                  await addDoc(collection(db, 'subscriptions', sub.id, 'payments'), {
+                    uid: user.uid,
+                    subscriptionId: sub.id,
+                    amount: sub.amount,
+                    date: nextPaymentDate.toISOString(),
+                    status: 'paid',
+                    type: 'regular',
+                    note: 'Otomatik Plan Yenilemesi'
+                  });
+                  existingMonthKeys.add(paymentMonthKey);
+                } catch (error) {
+                  console.error(`Failed to auto-record payment for ${sub.name}:`, error);
+                  break; 
+                }
               }
             }
-          });
-        } catch (e) {
-          console.error(`Failed to check existing payments for ${sub.name}:`, e);
-        }
-        
-        while (differenceInCalendarDays(now, nextPaymentDate) >= 0) {
-          const paymentMonthKey = format(nextPaymentDate, 'yyyy-MM');
-          if (!existingMonthKeys.has(paymentMonthKey)) {
-            try {
-              await addDoc(collection(db, 'subscriptions', sub.id, 'payments'), {
-                uid: user.uid,
-                subscriptionId: sub.id,
+            nextPaymentDate = sub.billingCycle === 'monthly' 
+              ? addMonths(nextPaymentDate, 1) 
+              : addYears(nextPaymentDate, 1);
+            
+            updated = true;
+            if (isAfter(nextPaymentDate, addYears(now, 2))) break;
+          }
+
+          if (updated) {
+            if (user) {
+              try {
+                await updateDoc(doc(db, 'subscriptions', sub.id), {
+                  nextPaymentDate: nextPaymentDate.toISOString()
+                });
+              } catch (error) {
+                console.error(`Failed to update subscription date for ${sub.name}:`, error);
+              }
+            }
+
+            // If connected to Google Calendar, turn event green (colorId: 10 - Basil)
+            if (token) {
+              markSubscriptionEventPaidInGoogleCalendar(token, targetCalId, {
+                eventId: sub.calendarEventId,
+                name: sub.name,
                 amount: sub.amount,
-                date: nextPaymentDate.toISOString(),
-                status: 'paid',
-                type: 'regular',
-                note: 'Otomatik Plan Yenilemesi'
-              });
-              existingMonthKeys.add(paymentMonthKey);
-            } catch (error) {
-              console.error(`Failed to auto-record payment for ${sub.name}:`, error);
-              break; 
+                currency: profile?.currency || 'USD',
+                category: sub.category,
+                dueDate: currentNextDateString
+              }).catch(() => {});
             }
           }
-          nextPaymentDate = sub.billingCycle === 'monthly' 
-            ? addMonths(nextPaymentDate, 1) 
-            : addYears(nextPaymentDate, 1);
-          
-          updated = true;
-          if (isAfter(nextPaymentDate, addYears(now, 2))) break;
         }
+      }
 
-        if (updated) {
+      // 2. Auto-execute due installments with auto-payment enabled
+      if (installments && installments.length > 0) {
+        for (const inst of installments) {
+          if (inst.status !== 'active' || !inst.isAutoPayment) continue;
+          if (!inst.nextPaymentDate) continue;
           try {
-            await updateDoc(doc(db, 'subscriptions', sub.id), {
-              nextPaymentDate: nextPaymentDate.toISOString()
-            });
-          } catch (error) {
-            console.error(`Failed to update subscription date for ${sub.name}:`, error);
-          }
-
-          // If connected to Google Calendar and synced, turn event green (colorId: 10 - Basil)
-          const token = getCachedAccessToken();
-          const targetCalId = profile?.calendarSettings?.calendarId || 'primary';
-          if (token && sub.calendarEventId) {
-            markSubscriptionEventPaidInGoogleCalendar(token, targetCalId, {
-              eventId: sub.calendarEventId,
-              name: sub.name,
-              amount: sub.amount,
-              currency: profile?.currency || 'USD',
-              category: sub.category
-            }).catch(() => {});
-          }
+            const isDue = differenceInCalendarDays(now, parseISO(inst.nextPaymentDate)) >= 0;
+            if (isDue && inst.lastPaidMonth !== curMonthStr && (inst.paidInstallments || 0) < inst.totalInstallments) {
+              await handlePayInstallment(inst.id);
+            }
+          } catch {}
         }
       }
 
-      // Auto-execute due payments with auto-payment (otomatik ödeme) enabled
-      const curMonthStr = format(now, 'yyyy-MM');
-      for (const inst of installments) {
-        if (inst.status !== 'active' || !inst.isAutoPayment) continue;
-        if (!inst.nextPaymentDate) continue;
-        try {
-          const isDue = differenceInCalendarDays(now, parseISO(inst.nextPaymentDate)) >= 0;
-          if (isDue && inst.lastPaidMonth !== curMonthStr && (inst.paidInstallments || 0) < inst.totalInstallments) {
-            handlePayInstallment(inst.id);
-          }
-        } catch {}
-      }
-
-      for (const regPay of regularPayments) {
-        if (regPay.status !== 'active' || !regPay.isAutoPayment) continue;
-        if (!regPay.nextPaymentDate) continue;
-        try {
-          const isDue = differenceInCalendarDays(now, parseISO(regPay.nextPaymentDate)) >= 0;
-          if (isDue && regPay.lastPaidMonth !== curMonthStr) {
-            handlePayRegularPayment(regPay.id);
-          }
-        } catch {}
+      // 3. Auto-execute due regular payments and turn Google Calendar green
+      if (regularPayments && regularPayments.length > 0) {
+        for (const regPay of regularPayments) {
+          if (regPay.status !== 'active' || !regPay.isAutoPayment) continue;
+          if (!regPay.nextPaymentDate) continue;
+          try {
+            const isDue = differenceInCalendarDays(now, parseISO(regPay.nextPaymentDate)) >= 0;
+            if (isDue) {
+              if (regPay.lastPaidMonth !== curMonthStr) {
+                // Execute auto-payment and update calendar event to green
+                await handlePayRegularPayment(regPay.id);
+              } else if (token) {
+                // Already marked paid in SubTrack, ensure Google Calendar event is green
+                markRegularPaymentEventPaidInGoogleCalendar(token, targetCalId, {
+                  eventId: regPay.calendarEventId,
+                  name: regPay.name,
+                  amount: regPay.amount,
+                  currency: profile?.currency || 'USD',
+                  payee: regPay.payee,
+                  dueDate: regPay.lastPaidDate || regPay.nextPaymentDate,
+                  isAutoPayment: true
+                }).catch(() => {});
+              }
+            }
+          } catch {}
+        }
       }
     } finally {
       isAutoRecordingRef.current = false;
@@ -1950,29 +2103,25 @@ export default function App() {
     }, 0);
   }, [subscriptions]);
 
-  const statsComparison = useMemo(() => {
-    const now = new Date();
-    const currentMKey = format(now, 'yyyy-MM');
-    const lastMonthDate = addMonths(now, -1);
-    const lastMKey = format(lastMonthDate, 'yyyy-MM');
-    let currentTotal = 0;
-    let lastTotal = 0;
-    allPayments.forEach(p => {
-      const d = parseISO(p.date);
-      const key = format(d, 'yyyy-MM');
-      if (key === currentMKey) currentTotal += p.amount;
-      if (key === lastMKey) lastTotal += p.amount;
-    });
-    const diff = currentTotal - lastTotal;
-    const percent = lastTotal > 0 ? (diff / lastTotal) * 100 : 0;
-    return {
-      currentTotal,
-      lastTotal,
-      diff,
-      percent,
-      isHigher: diff > 0
-    };
-  }, [allPayments]);
+  const monthlyRegularTotal = useMemo(() => {
+    return regularPayments
+      .filter(p => p.status === 'active')
+      .reduce((acc, curr) => {
+        if (curr.frequency === 'quarterly') return acc + (curr.amount / 3);
+        if (curr.frequency === 'annual') return acc + (curr.amount / 12);
+        return acc + curr.amount;
+      }, 0);
+  }, [regularPayments]);
+
+  const monthlyInstallmentsTotal = useMemo(() => {
+    return installments
+      .filter(i => i.status === 'active')
+      .reduce((acc, curr) => acc + (curr.monthlyAmount || 0), 0);
+  }, [installments]);
+
+  const totalAllMonthly = useMemo(() => {
+    return monthlyTotal + monthlyRegularTotal + monthlyInstallmentsTotal;
+  }, [monthlyTotal, monthlyRegularTotal, monthlyInstallmentsTotal]);
 
   const categoryData = useMemo(() => {
     const data: { [key: string]: number } = {};
@@ -1993,34 +2142,111 @@ export default function App() {
   }, [subscriptions]);
 
   const monthlyHistoryData = useMemo(() => {
-    const data: { [key: string]: { total: number, date: Date, label: string } } = {};
-    
+    const monthKeysSet = new Set<string>();
+    const now = new Date();
+    // Default to the last 5 months plus current month
+    for (let i = -5; i <= 0; i++) {
+      const d = addMonths(now, i);
+      monthKeysSet.add(format(d, 'yyyy-MM'));
+    }
+
     allPayments.forEach(p => {
-      try {
-        if (!p.date) return;
-        const d = parseISO(p.date);
-        if (isNaN(d.getTime())) return;
-        
-        const mKey = format(d, 'yyyy-MM');
-        const mLabel = format(d, 'MMM yyyy');
-        
-        if (!data[mKey]) {
-          data[mKey] = { total: 0, date: d, label: mLabel };
-        }
-        data[mKey].total += p.amount || 0;
-      } catch (e) {
-        console.warn('Failed to parse payment date:', p.date, e);
+      if (p.date) {
+        try {
+          const d = parseISO(p.date);
+          if (!isNaN(d.getTime())) {
+            monthKeysSet.add(format(d, 'yyyy-MM'));
+          }
+        } catch {}
       }
     });
-    
-    return Object.entries(data)
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([key, value]) => ({ 
-        key,
-        name: value.label, 
-        value: value.total 
-      }));
-  }, [allPayments]);
+
+    const currentMKey = format(now, 'yyyy-MM');
+    const sortedMonthKeys = Array.from(monthKeysSet).sort();
+
+    return sortedMonthKeys.map(mKey => {
+      const [y, m] = mKey.split('-').map(Number);
+      const d = new Date(y, m - 1, 1);
+      const label = format(d, 'MMM yyyy');
+
+      // Actual recorded payments for this month
+      const mPayments = allPayments.filter(p => p.date && p.date.startsWith(mKey));
+      const paymentsSum = mPayments.reduce((acc, p) => acc + (p.amount || 0), 0);
+      const topupsThisMonth = mPayments
+        .filter(p => p.type === 'topup')
+        .reduce((acc, p) => acc + (p.amount || 0), 0);
+
+      // Subscriptions
+      const subsActual = paymentsSum;
+      const subsPlanned = monthlyTotal + topupsThisMonth;
+      // In actual mode, if recorded payments exist for this month, use them (matching MonthDetailModal)
+      const subsTotal = trendMode === 'actual'
+        ? (paymentsSum > 0 ? paymentsSum : (mKey === currentMKey ? monthlyTotal : 0))
+        : subsPlanned;
+
+      // Regular payments
+      const regularPlanned = monthlyRegularTotal;
+      const regularPaid = regularPayments
+        .filter(p => p.status === 'active' && ((p.paidMonths && p.paidMonths.includes(mKey)) || (p.lastPaidMonth === mKey)))
+        .reduce((acc, curr) => {
+          if (curr.frequency === 'quarterly') return acc + (curr.amount / 3);
+          if (curr.frequency === 'annual') return acc + (curr.amount / 12);
+          if (curr.frequency === 'bimonthly') return acc + (curr.amount / 2);
+          return acc + (curr.amount || 0);
+        }, 0);
+      const regularTotal = trendMode === 'actual' ? (regularPaid > 0 ? regularPaid : regularPlanned) : regularPlanned;
+
+      // Installments
+      const installmentsPlanned = monthlyInstallmentsTotal;
+      const installmentsPaid = installments
+        .filter(i => i.status === 'active' && i.lastPaidMonth === mKey)
+        .reduce((acc, curr) => acc + (curr.monthlyAmount || 0), 0);
+      const installmentsTotal = trendMode === 'actual' ? (installmentsPaid > 0 ? installmentsPaid : installmentsPlanned) : installmentsPlanned;
+
+      let value = subsTotal;
+      if (trendFilter === 'all') {
+        value = Number((subsTotal + regularTotal + installmentsTotal).toFixed(2));
+      } else if (trendFilter === 'regular') {
+        value = Number(regularTotal.toFixed(2));
+      } else if (trendFilter === 'installments') {
+        value = Number(installmentsTotal.toFixed(2));
+      } else {
+        value = Number(subsTotal.toFixed(2));
+      }
+
+      return {
+        key: mKey,
+        name: label,
+        value,
+        subsTotal: Number(subsTotal.toFixed(2)),
+        subsActual: Number(subsActual.toFixed(2)),
+        subsPlanned: Number(subsPlanned.toFixed(2)),
+        regularTotal: Number(regularTotal.toFixed(2)),
+        regularPaid: Number(regularPaid.toFixed(2)),
+        regularPlanned: Number(regularPlanned.toFixed(2)),
+        installmentsTotal: Number(installmentsTotal.toFixed(2)),
+        installmentsPaid: Number(installmentsPaid.toFixed(2)),
+        installmentsPlanned: Number(installmentsPlanned.toFixed(2))
+      };
+    });
+  }, [allPayments, monthlyTotal, monthlyRegularTotal, monthlyInstallmentsTotal, regularPayments, installments, trendFilter, trendMode]);
+
+  const statsComparison = useMemo(() => {
+    if (monthlyHistoryData.length < 2) {
+      return { currentTotal: 0, lastTotal: 0, diff: 0, percent: 0, isHigher: false };
+    }
+    const current = monthlyHistoryData[monthlyHistoryData.length - 1]?.value || 0;
+    const last = monthlyHistoryData[monthlyHistoryData.length - 2]?.value || 0;
+    const diff = current - last;
+    const percent = last > 0 ? (diff / last) * 100 : 0;
+    return {
+      currentTotal: current,
+      lastTotal: last,
+      diff,
+      percent,
+      isHigher: diff > 0
+    };
+  }, [monthlyHistoryData]);
 
   const duplicatePaymentsInfo = useMemo(() => {
     const seen: { [key: string]: boolean } = {};
@@ -2243,7 +2469,10 @@ export default function App() {
           category: sub.category,
           billingCycle: sub.billingCycle,
           nextPaymentDate: sub.nextPaymentDate,
-          status: sub.status
+          status: sub.status,
+          note: sub.note,
+          isAutoPayment: sub.isAutoPayment,
+          isPaid: Boolean(sub.isAutoPayment)
         },
         sub.calendarEventId
       );
@@ -2451,15 +2680,31 @@ export default function App() {
       signInWithLocalEmail: handleLocalLogin
     }}>
       <ErrorBoundary>
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-950 font-sans text-gray-900 dark:text-gray-100 pb-20 transition-colors">
-          <Navbar 
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-950 font-sans text-gray-900 dark:text-gray-100 flex flex-col lg:flex-row transition-colors">
+          {/* Left Navigation Sidebar */}
+          <AppSidebar 
             activeTab={activeMainTab}
             onSelectTab={setActiveMainTab}
             activeInstallmentsCount={installments.filter(i => i.status === 'active').length}
             activeRegularPaymentsCount={regularPayments.filter(p => p.status === 'active').length}
+            incomesCount={incomes.filter(i => i.status !== 'paused').length}
+            savingsCount={savings.length}
+            isMobileOpen={isMobileSidebarOpen}
+            onCloseMobile={() => setIsMobileSidebarOpen(false)}
+            onOpenNotificationSettings={() => setIsNotificationSettingsOpen(true)}
           />
-          
-          <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+          {/* Right Main Content Column */}
+          <div className="flex-1 flex flex-col min-w-0 min-h-screen">
+            <AppHeader
+              activeTab={activeMainTab}
+              onToggleMobileMenu={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
+              onOpenCalendarModal={() => setIsCalendarModalOpen(true)}
+              onOpenNotificationSettings={() => setIsNotificationSettingsOpen(true)}
+              isCalendarSyncEnabled={Boolean(profile?.calendarSettings?.enabled)}
+            />
+
+            <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
             {loading ? (
               <div className="flex flex-col items-center justify-center py-28 text-center">
                 <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4" />
@@ -2514,6 +2759,50 @@ export default function App() {
                 onGoToSubscriptions={() => setActiveMainTab('subscriptions')}
                 onGoToInstallments={() => setActiveMainTab('installments')}
                 onGoToRegularPayments={() => setActiveMainTab('regularPayments')}
+                onGoToIncomeSources={() => setActiveMainTab('incomeSources')}
+                onGoToSavingsFunds={() => setActiveMainTab('savingsFunds')}
+                onGoToTaxCenter={() => setActiveMainTab('tax')}
+              />
+            ) : activeMainTab === 'incomeSources' ? (
+              <MonthlyIncomeSourcesView
+                incomes={incomes}
+                taxProfile={taxProfile}
+                currencyCode={profile?.currency || 'USD'}
+                formatCurrency={formatCurrency}
+                onOpenAddIncomeModal={() => {
+                  setEditingIncome(null);
+                  setIsIncomeModalOpen(true);
+                }}
+                onEditIncome={(inc) => {
+                  setEditingIncome(inc);
+                  setIsIncomeModalOpen(true);
+                }}
+                onDeleteIncome={handleDeleteIncome}
+                onOpenTaxSettingsModal={() => setIsTaxModalOpen(true)}
+              />
+            ) : activeMainTab === 'savingsFunds' ? (
+              <SavingsTargetFundsView
+                savings={savings}
+                currencyCode={profile?.currency || 'USD'}
+                formatCurrency={formatCurrency}
+                onOpenAddSavingsModal={() => {
+                  setEditingSavings(null);
+                  setIsSavingsModalOpen(true);
+                }}
+                onEditSavings={(sav) => {
+                  setEditingSavings(sav);
+                  setIsSavingsModalOpen(true);
+                }}
+                onDeleteSavings={handleDeleteSavings}
+                onUpdateSavingsAmount={(id, newAmount) => {
+                  const target = savings.find(s => s.id === id);
+                  if (target) {
+                    handleSaveSavings({
+                      ...target,
+                      currentAmount: newAmount
+                    });
+                  }
+                }}
               />
             ) : activeMainTab === 'installments' ? (
               <InstallmentsView
@@ -2560,6 +2849,28 @@ export default function App() {
                 syncingCalendarId={syncingCalendarPaymentId}
                 payingPaymentId={payingRegularPaymentId}
                 onOpenCalendarModal={() => setIsCalendarModalOpen(true)}
+              />
+            ) : activeMainTab === 'tax' ? (
+              <TaxCenterView
+                taxProfile={taxProfile}
+                onSaveTaxProfile={handleSaveTaxProfile}
+                taxYearRecords={taxYearRecords}
+                onSaveTaxYearRecord={handleSaveTaxYearRecord}
+                onDeleteTaxYearRecord={handleDeleteTaxYearRecord}
+                currencyCode={profile?.currency || 'USD'}
+                formatCurrency={formatCurrency}
+                onOpenCalendarModal={() => setIsCalendarModalOpen(true)}
+              />
+            ) : activeMainTab === 'settings' ? (
+              <SettingsView
+                profile={profile}
+                onUpdateProfile={handleUpdateProfile}
+                darkMode={darkMode}
+                onToggleDarkMode={toggleDarkMode}
+                onOpenCalendarModal={() => setIsCalendarModalOpen(true)}
+                onOpenExportModal={() => setIsExportModalOpen(true)}
+                onOpenImportModal={() => setIsImportModalOpen(true)}
+                onRestoreDefaults={handleRestoreDefaultSubscriptions}
               />
             ) : (
               <div className="space-y-8">
@@ -2813,21 +3124,138 @@ export default function App() {
                   className="bg-white dark:bg-gray-900 rounded-[28px] border border-gray-100 dark:border-gray-800 shadow-sm overflow-hidden"
                 >
                   <div className="p-5 border-b border-gray-50 dark:border-gray-800">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-blue-50 dark:bg-blue-900/10 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400">
+                        <div className={cn(
+                          "w-10 h-10 rounded-xl flex items-center justify-center transition-colors",
+                          trendFilter === 'subscriptions' ? "bg-blue-50 dark:bg-blue-900/10 text-blue-600 dark:text-blue-400" :
+                          trendFilter === 'regular' ? "bg-amber-50 dark:bg-amber-900/10 text-amber-600 dark:text-amber-400" :
+                          trendFilter === 'installments' ? "bg-purple-50 dark:bg-purple-900/10 text-purple-600 dark:text-purple-400" :
+                          "bg-emerald-50 dark:bg-emerald-900/10 text-emerald-600 dark:text-emerald-400"
+                        )}>
                           <BarChart3 className="w-5 h-5" />
                         </div>
                         <div>
-                          <h2 className="text-lg font-black tracking-tight text-gray-900 dark:text-white leading-tight">{t('monthlyTrends')}</h2>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h2 className="text-lg font-black tracking-tight text-gray-900 dark:text-white leading-tight">{t('monthlyTrends')}</h2>
+                            {(() => {
+                              const latestItem = monthlyHistoryData[monthlyHistoryData.length - 1];
+                              let badgeText = '';
+                              if (trendFilter === 'subscriptions') {
+                                badgeText = trendMode === 'actual'
+                                  ? `${t('subscriptions')} (${t('actualPaid')}): ${formatCurrency(latestItem?.subsActual || 0, profile?.currency)}`
+                                  : `${t('subscriptions')} (${t('plannedBudget')}): ${formatCurrency(monthlyTotal, profile?.currency)}`;
+                              } else if (trendFilter === 'regular') {
+                                badgeText = trendMode === 'actual'
+                                  ? `${t('regularPayments')} (${t('actualPaid')}): ${formatCurrency(latestItem?.regularPaid || 0, profile?.currency)}`
+                                  : `${t('regularPayments')} (${t('plannedBudget')}): ${formatCurrency(monthlyRegularTotal, profile?.currency)}`;
+                              } else if (trendFilter === 'installments') {
+                                badgeText = trendMode === 'actual'
+                                  ? `${t('installments')} (${t('actualPaid')}): ${formatCurrency(latestItem?.installmentsPaid || 0, profile?.currency)}`
+                                  : `${t('installments')} (${t('plannedBudget')}): ${formatCurrency(monthlyInstallmentsTotal, profile?.currency)}`;
+                              } else {
+                                badgeText = trendMode === 'actual'
+                                  ? `${t('total')} (${t('actualPaid')}): ${formatCurrency(latestItem?.value || 0, profile?.currency)}`
+                                  : `${t('total')} (${t('plannedBudget')}): ${formatCurrency(totalAllMonthly, profile?.currency)}`;
+                              }
+                              return (
+                                <span className={cn(
+                                  "px-2.5 py-0.5 rounded-full text-[11px] font-extrabold",
+                                  trendFilter === 'subscriptions' ? "bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300" :
+                                  trendFilter === 'regular' ? "bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300" :
+                                  trendFilter === 'installments' ? "bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-300" :
+                                  "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300"
+                                )}>
+                                  {badgeText}
+                                </span>
+                              );
+                            })()}
+                          </div>
                           <p className="text-[11px] text-gray-500 dark:text-gray-400">{t('monthlyTrendSubtitle')}</p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {/* Interactive Mode Selector: Gerçekleşen vs Planlanan */}
+                        <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-2xl text-[11px] font-bold gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setTrendMode('actual')}
+                            className={cn(
+                              "px-2.5 py-1.5 rounded-xl transition-all cursor-pointer",
+                              trendMode === 'actual'
+                                ? "bg-white dark:bg-gray-700 text-emerald-700 dark:text-emerald-300 font-black shadow-xs"
+                                : "text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                            )}
+                            title={t('actualPaid')}
+                          >
+                            {t('actualPaid')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTrendMode('planned')}
+                            className={cn(
+                              "px-2.5 py-1.5 rounded-xl transition-all cursor-pointer",
+                              trendMode === 'planned'
+                                ? "bg-white dark:bg-gray-700 text-blue-700 dark:text-blue-300 font-black shadow-xs"
+                                : "text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                            )}
+                            title={t('plannedBudget')}
+                          >
+                            {t('plannedBudget')}
+                          </button>
+                        </div>
+
+                        {/* Interactive Category Selector */}
+                        <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-2xl text-[11px] font-bold gap-1 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => setTrendFilter('subscriptions')}
+                            className={cn(
+                              "px-2.5 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1",
+                              trendFilter === 'subscriptions'
+                                ? "bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-300 shadow-xs"
+                                : "text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                            )}
+                            title={`${t('subscriptions')} (${formatCurrency(monthlyTotal, profile?.currency)})`}
+                          >
+                            <CreditCard className="w-3 h-3" />
+                            <span>{t('subscriptions')}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTrendFilter('regular')}
+                            className={cn(
+                              "px-2.5 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1",
+                              trendFilter === 'regular'
+                                ? "bg-white dark:bg-gray-700 text-amber-600 dark:text-amber-300 shadow-xs"
+                                : "text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                            )}
+                            title={`${t('regularPayments')} (${formatCurrency(monthlyRegularTotal, profile?.currency)})`}
+                          >
+                            <Receipt className="w-3 h-3" />
+                            <span>{t('regularPayments')}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTrendFilter('all')}
+                            className={cn(
+                              "px-2.5 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1",
+                              trendFilter === 'all'
+                                ? "bg-white dark:bg-gray-700 text-emerald-600 dark:text-emerald-300 shadow-xs"
+                                : "text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                            )}
+                            title={`${t('all')} (${formatCurrency(totalAllMonthly, profile?.currency)})`}
+                          >
+                            <Layers className="w-3 h-3" />
+                            <span>{t('all')}</span>
+                          </button>
+                        </div>
+
                         {statsComparison.lastTotal > 0 && (
                           <div className={cn(
-                            "px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5",
-                            statsComparison.isHigher ? "bg-red-50 text-red-600" : "bg-green-50 text-green-600"
+                            "px-2.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1 shrink-0",
+                            statsComparison.isHigher ? "bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400" : "bg-green-50 text-green-600 dark:bg-green-950/40 dark:text-green-400"
                           )}>
                             {statsComparison.isHigher ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
                             {statsComparison.isHigher ? '+' : ''}{statsComparison.percent.toFixed(0)}%
@@ -2876,10 +3304,18 @@ export default function App() {
                               title={t('inspectMonthRecords')}
                             >
                               <div className="flex flex-col">
-                                <span className={cn("text-[11px] font-bold group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors", idx === 0 ? "text-blue-600 dark:text-blue-400" : "text-gray-500 dark:text-gray-400")}>
+                                <span className={cn(
+                                  "text-[11px] font-bold transition-colors", 
+                                  idx === 0 
+                                    ? (trendFilter === 'regular' ? "text-amber-600 dark:text-amber-400" :
+                                       trendFilter === 'installments' ? "text-purple-600 dark:text-purple-400" :
+                                       trendFilter === 'all' ? "text-emerald-600 dark:text-emerald-400" :
+                                       "text-blue-600 dark:text-blue-400")
+                                    : "text-gray-500 dark:text-gray-400"
+                                )}>
                                   {data.name}
                                 </span>
-                                {idx === 0 && <span className="text-[9px] uppercase font-black tracking-tighter opacity-60">{t('latestMonth')}</span>}
+                                {idx === 0 && <span className="text-[9px] uppercase font-black tracking-tighter opacity-70">{t('latestMonth')}</span>}
                               </div>
                               <div className="flex items-center gap-1.5">
                                 <span className="text-xs font-black text-gray-900 dark:text-white">{formatCurrency(data.value, profile?.currency)}</span>
@@ -2913,22 +3349,91 @@ export default function App() {
                                 tickFormatter={(value) => `${getCurrencySymbol(profile?.currency)}${value}`}
                               />
                               <ReTooltip 
-                                contentStyle={{
-                                  borderRadius: '16px',
-                                  border: 'none',
-                                  boxShadow: '0 15px 35px -5px rgb(0 0 0 / 0.2)',
-                                  backgroundColor: document.documentElement.classList.contains('dark') ? '#111827' : '#ffffff',
-                                  padding: '12px'
+                                content={({ active, payload, label }) => {
+                                  if (!active || !payload || !payload.length) return null;
+                                  const item = payload[0].payload as any;
+                                  return (
+                                    <div className="bg-white dark:bg-gray-900 p-3.5 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-800 text-xs space-y-1.5 min-w-[170px]">
+                                      <p className="font-extrabold text-gray-900 dark:text-white border-b border-gray-100 dark:border-gray-800 pb-1">
+                                        {label}
+                                      </p>
+                                      <div className={cn(
+                                        "flex justify-between items-center font-black text-sm",
+                                        trendFilter === 'regular' ? "text-amber-600 dark:text-amber-400" :
+                                        trendFilter === 'installments' ? "text-purple-600 dark:text-purple-400" :
+                                        trendFilter === 'all' ? "text-emerald-600 dark:text-emerald-400" :
+                                        "text-blue-600 dark:text-blue-400"
+                                      )}>
+                                        <span>{t('total')}:</span>
+                                        <span>{formatCurrency(item.value, profile?.currency)}</span>
+                                      </div>
+                                      {trendFilter === 'subscriptions' && (
+                                        <div className="pt-1.5 space-y-1 text-[11px] text-gray-500 font-semibold border-t border-gray-100 dark:border-gray-800">
+                                          <div className="flex justify-between">
+                                            <span>{t('actualPaid')}:</span>
+                                            <span className="font-bold text-gray-700 dark:text-gray-300">{formatCurrency(item.subsActual, profile?.currency)}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span>{t('plannedBudget')}:</span>
+                                            <span className="font-bold text-gray-700 dark:text-gray-300">{formatCurrency(item.subsPlanned, profile?.currency)}</span>
+                                          </div>
+                                        </div>
+                                      )}
+                                      {trendFilter === 'regular' && (
+                                        <div className="pt-1.5 space-y-1 text-[11px] text-gray-500 font-semibold border-t border-gray-100 dark:border-gray-800">
+                                          <div className="flex justify-between">
+                                            <span>{t('actualPaid')}:</span>
+                                            <span className="font-bold text-gray-700 dark:text-gray-300">{formatCurrency(item.regularPaid, profile?.currency)}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span>{t('plannedBudget')}:</span>
+                                            <span className="font-bold text-gray-700 dark:text-gray-300">{formatCurrency(item.regularPlanned, profile?.currency)}</span>
+                                          </div>
+                                        </div>
+                                      )}
+                                      {trendFilter === 'installments' && (
+                                        <div className="pt-1.5 space-y-1 text-[11px] text-gray-500 font-semibold border-t border-gray-100 dark:border-gray-800">
+                                          <div className="flex justify-between">
+                                            <span>{t('actualPaid')}:</span>
+                                            <span className="font-bold text-gray-700 dark:text-gray-300">{formatCurrency(item.installmentsPaid, profile?.currency)}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span>{t('plannedBudget')}:</span>
+                                            <span className="font-bold text-gray-700 dark:text-gray-300">{formatCurrency(item.installmentsPlanned, profile?.currency)}</span>
+                                          </div>
+                                        </div>
+                                      )}
+                                      {trendFilter === 'all' && (
+                                        <div className="pt-1.5 space-y-1 text-[11px] text-gray-500 font-semibold border-t border-gray-100 dark:border-gray-800">
+                                          <div className="flex justify-between">
+                                            <span>💳 {t('subscriptions')}:</span>
+                                            <span className="font-bold text-gray-700 dark:text-gray-300">{formatCurrency(item.subsTotal, profile?.currency)}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span>🏠 {t('regularPayments')}:</span>
+                                            <span className="font-bold text-gray-700 dark:text-gray-300">{formatCurrency(item.regularTotal, profile?.currency)}</span>
+                                          </div>
+                                          <div className="flex justify-between">
+                                            <span>🛍️ {t('installments')}:</span>
+                                            <span className="font-bold text-gray-700 dark:text-gray-300">{formatCurrency(item.installmentsTotal, profile?.currency)}</span>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
                                 }}
-                                cursor={{ fill: 'transparent' }}
-                                formatter={(value: any) => [formatCurrency(Number(value) || 0, profile?.currency), t('total')]}
                               />
                               <Bar 
                                 dataKey="value" 
-                                fill="#3b82f6" 
+                                fill={
+                                  trendFilter === 'subscriptions' ? '#3b82f6' :
+                                  trendFilter === 'regular' ? '#f59e0b' :
+                                  trendFilter === 'installments' ? '#a855f7' :
+                                  '#10b981'
+                                }
                                 radius={[4, 4, 0, 0]}
                                 barSize={32}
-                                animationDuration={1500}
+                                animationDuration={1000}
                                 onClick={(entry: any) => {
                                   if (entry && entry.key) {
                                     setSelectedMonthKey(entry.key);
@@ -3146,29 +3651,12 @@ export default function App() {
                         </div>
                       )}
                     </div>
-
-                    {/* Upcoming Installments Widget right under Upcoming Bills as requested by user */}
-                    <UpcomingInstallmentsWidget
-                      installments={installments}
-                      currencyCode={profile?.currency || 'USD'}
-                      formatCurrency={formatCurrency}
-                      onPayInstallment={handlePayInstallment}
-                      onOpenAddModal={() => {
-                        setEditingInstallment(null);
-                        setIsInstallmentModalOpen(true);
-                      }}
-                      onGoToInstallmentsTab={() => setActiveMainTab('installments')}
-                      onSyncInstallmentToCalendar={handleSyncSingleInstallment}
-                      syncingCalendarId={syncingCalendarInstallmentId}
-                      payingInstallmentId={payingInstallmentId}
-                      onSetAutoPayment={handleSetAutoPayment}
-                      onToggleAutoPayment={handleToggleAutoPayment}
-                    />
                   </div>
                 </div>
               </div>
             )}
           </main>
+          </div>
 
           {/* Dialogs and Popups */}
           <AddEditModal 
@@ -3215,6 +3703,9 @@ export default function App() {
             monthKey={selectedMonthKey}
             allPayments={allPayments}
             subscriptions={subscriptions}
+            regularPayments={regularPayments}
+            installments={installments}
+            defaultCategory={trendFilter}
             onConfirmAction={confirm}
           />
 
@@ -3322,6 +3813,11 @@ export default function App() {
             onSave={handleSaveTaxProfile}
             taxProfile={taxProfile}
             currencyCode={profile?.currency || 'USD'}
+          />
+
+          <NotificationSettingsModal 
+            isOpen={isNotificationSettingsOpen} 
+            onClose={() => setIsNotificationSettingsOpen(false)} 
           />
         </div>
       </ErrorBoundary>
