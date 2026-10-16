@@ -25,7 +25,8 @@ import {
   Percent,
   Layers,
   ChevronRight,
-  Landmark
+  Landmark,
+  Store
 } from 'lucide-react';
 import { IncomeItem, TaxProfile } from '../types';
 import { useTranslation } from '../context/LanguageContext';
@@ -193,8 +194,14 @@ export const MonthlyIncomeSourcesView: React.FC<MonthlyIncomeSourcesViewProps> =
       case 'business':
         return {
           icon: Landmark,
-          label: language === 'tr' ? 'Ticari / Şirket Geliri' : 'Business Revenue',
+          label: language === 'tr' ? 'Şirket Hasılatı' : 'Business Revenue',
           badgeClass: 'bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-800'
+        };
+      case 'commercial':
+        return {
+          icon: Store,
+          label: language === 'tr' ? 'Commercial / Kendi İşi & Ticari' : 'Commercial / Self-Employed',
+          badgeClass: 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800'
         };
       default:
         return {
@@ -428,11 +435,12 @@ export const MonthlyIncomeSourcesView: React.FC<MonthlyIncomeSourcesViewProps> =
           >
             <option value="all">{language === 'tr' ? 'Tüm Kategoriler' : 'All Categories'}</option>
             <option value="salary">{language === 'tr' ? 'Maaş / Ana Gelir' : 'Salary'}</option>
+            <option value="commercial">{language === 'tr' ? 'Commercial / Kendi İşi & Ticari' : 'Commercial'}</option>
             <option value="freelance">{language === 'tr' ? 'Freelance & Danışmanlık' : 'Freelance'}</option>
             <option value="investment">{language === 'tr' ? 'Yatırım & Temettü' : 'Investment'}</option>
             <option value="rental">{language === 'tr' ? 'Kira Geliri' : 'Rental'}</option>
             <option value="bonus">{language === 'tr' ? 'Prim & İkramiye' : 'Bonus'}</option>
-            <option value="business">{language === 'tr' ? 'Ticari Gelir' : 'Business'}</option>
+            <option value="business">{language === 'tr' ? 'Şirket Hasılatı' : 'Business'}</option>
             <option value="other">{language === 'tr' ? 'Diğer Gelir' : 'Other'}</option>
           </select>
 

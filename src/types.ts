@@ -43,6 +43,7 @@ export interface Subscription {
   calendarEventId?: string;
   calendarSyncedAt?: string;
   isAutoPayment?: boolean;
+  isPaid?: boolean;
   lastPaidMonth?: string;
   lastPaidDate?: string;
   note?: string;
@@ -127,7 +128,7 @@ export interface IncomeItem {
   id: string;
   uid: string;
   name: string; // Örn: "Maaş / Ana Gelir", "Freelance Projeler", "Yatırım Getirisi", "Kira Geliri", "Ek Gelir"
-  category: 'salary' | 'freelance' | 'investment' | 'rental' | 'business' | 'bonus' | 'other';
+  category: 'salary' | 'freelance' | 'investment' | 'rental' | 'business' | 'commercial' | 'bonus' | 'other';
   amount: number; // Aylık veya dönemsel tutar
   frequency: 'monthly' | 'biweekly' | 'irregular' | 'annual';
   receivedDay?: number; // Ayın kaçı (1-31)

@@ -232,7 +232,7 @@ export const syncEventToGoogleCalendar = async (
       date: endDateStr
     },
     recurrence: [recurrenceRule],
-    colorId: isGreen ? '10' : undefined, // 10 = Basil (Forest Green)
+    colorId: isGreen ? '10' : '6', // 10 = Basil (Forest Green), 6 = Tangerine
     // Google Calendar universally supports popup reminders. Email reminder can fail on accounts without email notification support.
     reminders: isGreen
       ? { useDefault: false, overrides: [] }
@@ -249,15 +249,34 @@ export const syncEventToGoogleCalendar = async (
     transparency: 'transparent'
   });
 
-  // If existing event ID wasn't provided, search Google Calendar for existing events matching this subscription
   let targetEventId = existingEventId;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
 
   try {
-    // 1. Check Google Calendar for existing events with this subscription name
+    // 1. If existingEventId is provided, verify it on Google Calendar
+    if (existingEventId) {
+      try {
+        const verifyRes = await fetch(
+          `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${existingEventId}`,
+          { headers: { Authorization: `Bearer ${accessToken}` }, signal: controller.signal }
+        );
+        if (verifyRes.ok) {
+          const item = await verifyRes.json();
+          if (item && item.status !== 'cancelled') {
+            targetEventId = item.id;
+          } else {
+            targetEventId = undefined;
+          }
+        } else if (verifyRes.status === 404) {
+          targetEventId = undefined;
+        }
+      } catch {}
+    }
+
+    // 2. Search Google Calendar for events matching this subscription to deduplicate
     try {
-      const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events?maxResults=50&q=${encodeURIComponent(payload.name)}`;
+      const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events?maxResults=100&q=${encodeURIComponent(payload.name)}`;
       const searchRes = await fetch(searchUrl, {
         headers: { Authorization: `Bearer ${accessToken}` },
         signal: controller.signal
@@ -265,32 +284,32 @@ export const syncEventToGoogleCalendar = async (
       if (searchRes.ok) {
         const searchData = await searchRes.json();
         const items = searchData.items || [];
-        // Match items where summary or description contains payload.name or matches existingEventId
+        const cleanTargetName = payload.name.trim().toLowerCase();
         const matched = items.filter((it: any) => 
-          it.id === existingEventId ||
-          (it.summary && it.summary.toLowerCase().includes(payload.name.toLowerCase())) ||
-          (it.description && it.description.toLowerCase().includes(payload.name.toLowerCase()))
+          (existingEventId && it.id === existingEventId) ||
+          (it.summary && it.summary.toLowerCase().includes(cleanTargetName)) ||
+          (it.description && it.description.toLowerCase().includes(cleanTargetName))
         );
 
         if (matched.length > 0) {
-          targetEventId = matched[0].id;
+          if (!targetEventId) {
+            targetEventId = matched[0].id;
+          }
 
-          // If there are duplicate/excess events found for this subscription, clean them up!
-          if (matched.length > 1) {
-            for (let idx = 1; idx < matched.length; idx++) {
-              const dupId = matched[idx].id;
-              if (dupId && dupId !== targetEventId) {
-                fetch(`https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${dupId}`, {
-                  method: 'DELETE',
-                  headers: { Authorization: `Bearer ${accessToken}` }
-                }).catch(() => {});
-              }
+          // Clean up duplicate/excess events found for this subscription so only 1 card remains
+          for (let idx = 0; idx < matched.length; idx++) {
+            const dupId = matched[idx].id;
+            if (dupId && dupId !== targetEventId) {
+              fetch(`https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${dupId}`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${accessToken}` }
+              }).catch(() => {});
             }
           }
         }
       }
     } catch (searchErr) {
-      console.warn('Could not search for existing calendar events:', searchErr);
+      console.warn('Could not search/clean duplicate calendar events:', searchErr);
     }
 
     let url = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events`;
@@ -427,10 +446,35 @@ export const syncInstallmentMonthlyEventsToGoogleCalendar = async (
 
   const targetCalId = encodeURIComponent(calendarId || 'primary');
 
-  // If previous event IDs exist, clean them up first so calendar has no orphaned/duplicate events
+  // 1. If previous event IDs exist, clean them up first so calendar has no orphaned/duplicate events
   if (previousEventIds) {
     await deleteInstallmentCalendarEvents(accessToken, calendarId, previousEventIds).catch(() => {});
   }
+
+  // 2. Also search Google Calendar for existing events with this installment name to delete old duplicates
+  try {
+    const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events?maxResults=100&q=${encodeURIComponent(payload.name)}`;
+    const searchRes = await fetch(searchUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (searchRes.ok) {
+      const searchData = await searchRes.json();
+      const items = searchData.items || [];
+      const cleanName = payload.name.trim().toLowerCase();
+      const matched = items.filter((it: any) =>
+        (it.summary && it.summary.toLowerCase().includes(cleanName)) ||
+        (it.description && it.description.toLowerCase().includes(cleanName))
+      );
+      for (const m of matched) {
+        if (m.id) {
+          fetch(`https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${m.id}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${accessToken}` }
+          }).catch(() => {});
+        }
+      }
+    }
+  } catch {}
 
   const total = Math.max(1, payload.totalInstallments || 1);
   const paid = Math.max(0, payload.paidInstallments || 0);
@@ -502,7 +546,7 @@ export const syncInstallmentMonthlyEventsToGoogleCalendar = async (
       end: {
         date: endDateStr
       },
-      colorId: isInstAuto ? '10' : undefined, // 10 = Basil (Forest Green)
+      colorId: isInstAuto ? '10' : '6', // 10 = Basil (Forest Green), 6 = Tangerine
       reminders: isInstAuto
         ? { useDefault: false, overrides: [] }
         : useCustomReminders
@@ -806,6 +850,8 @@ export const syncRegularPaymentToGoogleCalendar = async (
     accountOrSubscriberNo?: string;
     note?: string;
     isPaid?: boolean;
+    lastPaidMonth?: string;
+    paidMonths?: string[];
   },
   existingEventId?: string
 ): Promise<{ eventId: string; htmlLink?: string }> => {
@@ -823,8 +869,13 @@ export const syncRegularPaymentToGoogleCalendar = async (
   const curr = payment.currency || 'USD';
 
   const todayStr = new Date().toISOString().split('T')[0];
-  const isDueOrPast = Boolean(dateStr <= todayStr);
-  const isPaidOrAutoPaid = Boolean(payment.isPaid || payment.isAutoPayment || (payment.isAutoPayment && isDueOrPast));
+  const curMonthStr = `${y}-${String(m).padStart(2, '0')}`;
+  const isPaidOrAutoPaid = Boolean(
+    payment.isPaid || 
+    payment.isAutoPayment ||
+    payment.lastPaidMonth === curMonthStr ||
+    (payment.paidMonths && payment.paidMonths.includes(curMonthStr))
+  );
 
   const categoryLabels: Record<string, string> = {
     rent: '🏠 Kira',
@@ -850,7 +901,7 @@ export const syncRegularPaymentToGoogleCalendar = async (
       (payment.payee ? `🏢 Alıcı: ${payment.payee}\n` : '') +
       `💵 Tutar: ${payment.amount.toFixed(2)} ${curr}\n` +
       `📅 Vade / Ödeme Tarihi: ${dateStr}\n` +
-      (payment.isAutoPayment ? `🔄 Ödeme Türü: Otomatik Ödeme Talimatı ile Günü Geldiğinde Ödendi\n` : `✋ Ödeme Türü: Manuel Ödendi\n`) +
+      (payment.isAutoPayment ? `🔄 Ödeme Türü: Otomatik Ödeme Talimatı ile Ödendi (Yeşil)\n` : `✋ Ödeme Türü: Manuel Ödendi\n`) +
       (payment.accountOrSubscriberNo ? `🔢 Abone/Tesisat/IBAN: ${payment.accountOrSubscriberNo}\n` : '') +
       (payment.bankOrCard ? `🏦 Ödeme Hesabı/Kartı: ${payment.bankOrCard}\n` : '') +
       (payment.note ? `📝 Not: ${payment.note}\n` : '') +
@@ -883,9 +934,66 @@ export const syncRegularPaymentToGoogleCalendar = async (
         }
   };
 
+  let targetEventId = existingEventId;
+
+  // 1. If existingEventId is provided, verify it exists
   if (existingEventId) {
     try {
-      const url = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${existingEventId}`;
+      const verifyRes = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${existingEventId}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      if (verifyRes.ok) {
+        const item = await verifyRes.json();
+        if (item && item.status !== 'cancelled') {
+          targetEventId = item.id;
+        } else {
+          targetEventId = undefined;
+        }
+      } else if (verifyRes.status === 404) {
+        targetEventId = undefined;
+      }
+    } catch {}
+  }
+
+  // 2. Search Google Calendar for matching regular payments to deduplicate
+  try {
+    const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events?maxResults=100&q=${encodeURIComponent(payment.name)}`;
+    const searchRes = await fetch(searchUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (searchRes.ok) {
+      const searchData = await searchRes.json();
+      const items = searchData.items || [];
+      const cleanName = payment.name.trim().toLowerCase();
+      const matched = items.filter((it: any) =>
+        (existingEventId && it.id === existingEventId) ||
+        (it.summary && it.summary.toLowerCase().includes(cleanName))
+      );
+
+      if (matched.length > 0) {
+        if (!targetEventId) {
+          targetEventId = matched[0].id;
+        }
+
+        // Clean up any extra duplicate cards for this payment
+        for (let idx = 0; idx < matched.length; idx++) {
+          const dupId = matched[idx].id;
+          if (dupId && dupId !== targetEventId) {
+            fetch(`https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${dupId}`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${accessToken}` }
+            }).catch(() => {});
+          }
+        }
+      }
+    }
+  } catch {}
+
+  // 3. Update existing event or create if not present
+  if (targetEventId) {
+    try {
+      const url = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${targetEventId}`;
       const res = await fetch(url, {
         method: 'PATCH',
         headers: {

@@ -467,7 +467,9 @@ export default function App() {
           remainingInstallments: inst.remainingInstallments || (inst.totalInstallments - (inst.paidInstallments || 0)),
           nextPaymentDate: inst.nextPaymentDate,
           bankOrCard: inst.bankOrCard,
-          note: inst.note
+          note: inst.note,
+          isAutoPayment: inst.isAutoPayment,
+          isPaid: Boolean(inst.isAutoPayment || inst.lastPaidMonth === format(new Date(), 'yyyy-MM') || (inst.paidInstallments || 0) >= inst.totalInstallments)
         },
         inst.calendarEventIds || inst.calendarEventId
       );
@@ -1020,8 +1022,11 @@ export default function App() {
     try {
       const todayStr = new Date().toISOString().split('T')[0];
       const curMonth = format(new Date(), 'yyyy-MM');
-      const isDueOrPast = Boolean(payment.nextPaymentDate && payment.nextPaymentDate <= todayStr);
-      const isPaid = Boolean(payment.lastPaidMonth === curMonth || (payment.isAutoPayment && isDueOrPast));
+      const isPaid = Boolean(
+        payment.isAutoPayment ||
+        payment.lastPaidMonth === curMonth ||
+        (payment.paidMonths && payment.paidMonths.includes(curMonth))
+      );
 
       const targetCalId = profile?.calendarSettings?.calendarId || 'primary';
       const result = await syncRegularPaymentToGoogleCalendar(
@@ -1339,16 +1344,16 @@ export default function App() {
   const toggleDarkMode = async () => {
     const newMode = !darkMode;
     setDarkMode(newMode);
+    localStorage.setItem('darkMode', String(newMode));
+    
+    if (newMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
     
     if (profile) {
       setProfile({ ...profile, darkMode: newMode });
-    } else {
-      localStorage.setItem('darkMode', String(newMode));
-      if (newMode) {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
     }
 
     if (user) {
@@ -1357,7 +1362,7 @@ export default function App() {
           darkMode: newMode
         });
       } catch (error) {
-        console.error('Error updating dark mode:', error);
+        console.warn('Error updating dark mode in firestore:', error);
       }
     }
   };
@@ -2459,6 +2464,14 @@ export default function App() {
     }
     try {
       const calId = profile?.calendarSettings?.calendarId || 'primary';
+      const currentMonthStr = new Date().toISOString().slice(0, 7);
+      const isPaidThisMonth = Boolean(
+        allPayments.some(p => p.subscriptionId === sub.id && p.date?.startsWith(currentMonthStr) && p.status === 'paid') ||
+        sub.lastPaidMonth === currentMonthStr ||
+        sub.isPaid
+      );
+      const isSubGreen = Boolean(sub.isAutoPayment || isPaidThisMonth);
+
       const result = await syncEventToGoogleCalendar(
         token,
         calId,
@@ -2472,10 +2485,19 @@ export default function App() {
           status: sub.status,
           note: sub.note,
           isAutoPayment: sub.isAutoPayment,
-          isPaid: Boolean(sub.isAutoPayment)
+          isPaid: isSubGreen
         },
         sub.calendarEventId
       );
+
+      const updatedSub = {
+        ...sub,
+        calendarEventId: result.eventId,
+        calendarSyncedAt: new Date().toISOString()
+      };
+
+      setSubscriptions(prev => prev.map(s => s.id === sub.id ? updatedSub : s));
+
       await updateDoc(doc(db, 'subscriptions', sub.id), {
         calendarEventId: result.eventId,
         calendarSyncedAt: new Date().toISOString()
@@ -3664,6 +3686,7 @@ export default function App() {
             onClose={() => setIsModalOpen(false)} 
             sub={editingSub} 
             onSave={handleSaveSubscription}
+            existingSubscriptions={subscriptions}
           />
           
           <PaymentHistoryModal 

@@ -14,7 +14,8 @@ import {
   Calendar,
   Gift,
   HelpCircle,
-  FileText
+  FileText,
+  Store
 } from 'lucide-react';
 import { IncomeItem } from '../types';
 import { useTranslation } from '../context/LanguageContext';
@@ -36,10 +37,11 @@ const INCOME_CATEGORIES: {
   color: string;
 }[] = [
   { key: 'salary', labelEn: 'Salary / Main Income', labelTr: 'Maaş / Ana Gelir', icon: Briefcase, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200' },
+  { key: 'commercial', labelEn: 'Commercial / Self-Employed', labelTr: 'Commercial / Kendi İşi & Ticari', icon: Store, color: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200' },
   { key: 'freelance', labelEn: 'Freelance & Consulting', labelTr: 'Freelance & Danışmanlık', icon: TrendingUp, color: 'text-blue-600 bg-blue-50 dark:bg-blue-950/40 border-blue-200' },
   { key: 'investment', labelEn: 'Dividends & Yield', labelTr: 'Yatırım & Temettü', icon: DollarSign, color: 'text-purple-600 bg-purple-50 dark:bg-purple-950/40 border-purple-200' },
   { key: 'rental', labelEn: 'Rental Income', labelTr: 'Kira Geliri', icon: Building, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/40 border-amber-200' },
-  { key: 'business', labelEn: 'Business Revenue', labelTr: 'Ticari / Şirket Geliri', icon: Briefcase, color: 'text-cyan-600 bg-cyan-50 dark:bg-cyan-950/40 border-cyan-200' },
+  { key: 'business', labelEn: 'Business Revenue', labelTr: 'Şirket Hasılatı', icon: Briefcase, color: 'text-cyan-600 bg-cyan-50 dark:bg-cyan-950/40 border-cyan-200' },
   { key: 'bonus', labelEn: 'Bonus & Incentives', labelTr: 'Prim & İkramiye', icon: Gift, color: 'text-rose-600 bg-rose-50 dark:bg-rose-950/40 border-rose-200' },
   { key: 'other', labelEn: 'Other Income', labelTr: 'Diğer Gelir', icon: HelpCircle, color: 'text-gray-600 bg-gray-50 dark:bg-gray-800 border-gray-200' },
 ];

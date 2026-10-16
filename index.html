@@ -19,6 +19,16 @@
           enumerable: true
         });
       } catch (e) {}
+
+      try {
+        var savedMode = localStorage.getItem('darkMode');
+        var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (savedMode === 'true' || (savedMode === null && prefersDark)) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      } catch (e) {}
     </script>
   </head>
   <body>

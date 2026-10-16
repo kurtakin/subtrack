@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { motion } from 'motion/react';
 import { format } from 'date-fns';
-import { Wand2, Sparkles, Calendar, Zap } from 'lucide-react';
+import { Wand2, Sparkles, Calendar, Zap, AlertCircle } from 'lucide-react';
 import { collection, addDoc, updateDoc, doc, setDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Subscription, OperationType, FirestoreErrorInfo } from '../types';
@@ -36,18 +36,21 @@ export const AddEditModal = ({
   isOpen, 
   onClose, 
   sub,
-  onSave
+  onSave,
+  existingSubscriptions = []
 }: { 
   isOpen: boolean, 
   onClose: () => void, 
   sub?: Subscription | null,
-  onSave?: (sub: Subscription) => void
+  onSave?: (sub: Subscription) => void,
+  existingSubscriptions?: Subscription[]
 }) => {
   const { user, profile } = useContext(AuthContext);
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const currencySymbol = getCurrencySymbol(profile?.currency);
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [syncToCalendar, setSyncToCalendar] = useState(true);
+  const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     amount: '',
@@ -85,6 +88,7 @@ export const AddEditModal = ({
       });
       setSyncToCalendar(true);
     }
+    setDuplicateError(null);
   }, [sub, isOpen]);
 
   const matchIconHeuristic = (name: string): string => {
@@ -148,7 +152,23 @@ export const AddEditModal = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
-    const data: any = {
+
+    // Check duplicate subscription in same list/month
+    const cleanName = formData.name.trim().toLowerCase();
+    const isDuplicate = existingSubscriptions.some(
+      s => s.id !== sub?.id && s.name.trim().toLowerCase() === cleanName
+    );
+    if (isDuplicate) {
+      setDuplicateError(
+        language === 'tr'
+          ? `"${formData.name.trim()}" aboneliği zaten listenizde kayıtlı! Aynı ay ve aynı aboneliğin birden fazla eklenmesine izin verilmemektedir. Ek harcamalar için abonelik kartı üzerindeki "+ Ek Ödeme (Top-up)" seçeneğini kullanabilirsiniz.`
+          : `"${formData.name.trim()}" subscription is already in your list! Adding the same subscription multiple times is not permitted. Please use "+ Extra Payment (Top-up)" on the subscription card for additional charges.`
+      );
+      return;
+    }
+
+    setDuplicateError(null);
+    const data = {
       uid: user.uid,
       name: formData.name,
       amount: parseFloat(formData.amount) || 0,
@@ -424,6 +444,15 @@ export const AddEditModal = ({
               className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
             />
           </div>
+
+          {duplicateError && (
+            <div className="p-3.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-start gap-2.5 text-xs text-rose-700 dark:text-rose-300">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <div className="flex-1 font-medium leading-relaxed">
+                {duplicateError}
+              </div>
+            </div>
+          )}
 
           <div className="flex gap-3 pt-4">
             <button 

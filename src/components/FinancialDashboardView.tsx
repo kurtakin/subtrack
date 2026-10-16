@@ -312,6 +312,48 @@ export const FinancialDashboardView: React.FC<FinancialDashboardViewProps> = ({
     ];
   }, [totalMonthlyIncome, totalMonthlyLivingExpense, totalMonthlySavings, netMonthlyFreeCashFlow, t]);
 
+  // Chart: 12-Month Projected Annual Net Budget Balance
+  const annualMonthlyProjectionData = useMemo(() => {
+    const monthNamesTr = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
+    const monthNamesEn = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const names = language === 'tr' ? monthNamesTr : monthNamesEn;
+    const currentYear = new Date().getFullYear();
+
+    return names.map((name, idx) => {
+      const monthNum = idx + 1;
+      const monthKey = `${currentYear}-${String(monthNum).padStart(2, '0')}`;
+
+      let incomeVal = incomes.reduce((acc, inc) => {
+        if (inc.status !== 'active') return acc;
+        if (inc.frequency === 'annual') {
+          if (inc.annualPayoutMonth === monthNum) return acc + inc.amount;
+          if (!inc.annualPayoutMonth) return acc + (inc.amount / 12);
+          return acc;
+        }
+        if (inc.frequency === 'irregular') {
+          if (inc.targetMonth === monthKey) return acc + inc.amount;
+          return acc;
+        }
+        if (inc.frequency === 'biweekly') {
+          return acc + (inc.amount * 26 / 12);
+        }
+        return acc + inc.amount;
+      }, 0);
+
+      const expenseVal = totalMonthlyLivingExpense;
+      const savingsVal = totalMonthlySavings;
+      const taxBonus = (monthNum === 4 || monthNum === 5) ? (expectedTaxRefund / 2) : 0;
+      const netVal = Number(((incomeVal + taxBonus) - expenseVal - savingsVal).toFixed(2));
+
+      return {
+        month: name,
+        Gelir: Number(incomeVal.toFixed(2)),
+        Gider: Number(expenseVal.toFixed(2)),
+        Net: netVal
+      };
+    });
+  }, [incomes, totalMonthlyLivingExpense, totalMonthlySavings, expectedTaxRefund, language]);
+
   return (
     <div className="space-y-8 animate-fadeIn">
       {/* 1. Header Banner & Quick Actions */}
@@ -361,25 +403,6 @@ export const FinancialDashboardView: React.FC<FinancialDashboardViewProps> = ({
               <span>{t('import')}</span>
             </button>
           )}
-
-
-          <button
-            type="button"
-            onClick={onOpenAddSavingsModal}
-            className="inline-flex items-center gap-2 px-4 py-3 bg-white dark:bg-gray-900 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900/60 hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded-2xl font-bold text-xs sm:text-sm transition-all shadow-xs cursor-pointer"
-          >
-            <PiggyBank className="w-4 h-4 text-blue-600" />
-            <span>{t('addSavingsTarget')}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onOpenAddIncomeModal}
-            className="inline-flex items-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm transition-all shadow-lg shadow-emerald-500/25 cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
-          >
-            <Plus className="w-5 h-5 stroke-[2.5]" />
-            <span>{t('addIncome')}</span>
-          </button>
         </div>
       </div>
 
@@ -680,284 +703,212 @@ export const FinancialDashboardView: React.FC<FinancialDashboardViewProps> = ({
               />
             </div>
           </div>
+
+          {/* Interactive 12-Month Projected Annual Net Budget Balance Chart */}
+          <div className="pt-4 mt-2 border-t border-gray-100 dark:border-gray-800 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <span className="text-xs font-black text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                {language === 'tr' ? '12 Aylık Net Bütçe Dengesi Grafiği' : '12-Month Net Budget Balance Chart'}
+              </span>
+              <div className="flex items-center gap-3 text-[11px] font-bold">
+                <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                  {language === 'tr' ? 'Gelir' : 'Income'}
+                </span>
+                <span className="flex items-center gap-1.5 text-rose-500 dark:text-rose-400">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                  {language === 'tr' ? 'Gider' : 'Expenses'}
+                </span>
+                <span className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
+                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
+                  {language === 'tr' ? 'Net Bütçe' : 'Net Budget'}
+                </span>
+              </div>
+            </div>
+
+            <div className="h-44 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={annualMonthlyProjectionData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={document.documentElement.classList.contains('dark') ? '#1f2937' : '#f1f5f9'} />
+                  <XAxis 
+                    dataKey="month" 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} 
+                  />
+                  <YAxis 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} 
+                    tickFormatter={(val) => `${val >= 1000 ? `${(val/1000).toFixed(0)}k` : val}`} 
+                  />
+                  <ReTooltip 
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload || !payload.length) return null;
+                      const item = payload[0].payload as any;
+                      return (
+                        <div className="bg-white dark:bg-gray-900 p-3 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-800 text-xs space-y-1 min-w-[160px]">
+                          <p className="font-extrabold text-gray-900 dark:text-white border-b border-gray-100 dark:border-gray-800 pb-1">{label}</p>
+                          <div className="flex justify-between font-bold text-emerald-600">
+                            <span>{language === 'tr' ? 'Gelir:' : 'Income:'}</span>
+                            <span>+{formatCurrency(item.Gelir, currencyCode)}</span>
+                          </div>
+                          <div className="flex justify-between font-bold text-rose-500">
+                            <span>{language === 'tr' ? 'Gider:' : 'Expense:'}</span>
+                            <span>-{formatCurrency(item.Gider, currencyCode)}</span>
+                          </div>
+                          <div className="flex justify-between font-black border-t border-gray-100 dark:border-gray-800 pt-1 text-blue-600">
+                            <span>{language === 'tr' ? 'Net Bütçe:' : 'Net Budget:'}</span>
+                            <span>{item.Net >= 0 ? '+' : ''}{formatCurrency(item.Net, currencyCode)}</span>
+                          </div>
+                        </div>
+                      );
+                    }} 
+                  />
+                  <Bar dataKey="Gelir" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={14} />
+                  <Bar dataKey="Gider" fill="#f43f5e" radius={[4, 4, 0, 0]} maxBarSize={14} />
+                  <Bar dataKey="Net" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={14} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* 5. Clean Dashboard Summary: Monthly Income Sources & Saving Target Funds */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left: Monthly Income Sources Summary Widget */}
-        <div className="p-6 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-xs space-y-4 hover:border-emerald-200 dark:hover:border-emerald-900/40 transition-all flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
-                  <TrendingUp className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="text-base font-extrabold flex items-center gap-2 text-gray-900 dark:text-white">
-                    <span>{t('monthlyIncomeSources')}</span>
-                    <span className="text-xs px-2 py-0.2 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-extrabold">
-                      {incomes.length}
-                    </span>
-                  </h2>
-                  <p className="text-[11px] text-gray-400 font-medium">
-                    {language === 'tr' ? 'Maaş, serbest çalışma, temettü ve ek kazançlar' : 'Salary, freelance, dividends & extra earnings'}
-                  </p>
-                </div>
+      {/* 5. Quick Access to Financial Hub & Category Views */}
+      <div className="p-6 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-xs space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Layers className="w-5 h-5 text-emerald-600" />
+            <h3 className="text-sm font-black text-gray-900 dark:text-white">
+              {language === 'tr' ? 'Finansal Yönetim & Sayfalara Hızlı Erişim' : 'Financial Hub & Quick Page Access'}
+            </h3>
+          </div>
+          <span className="text-xs text-gray-400 font-medium hidden sm:inline">
+            {language === 'tr' ? 'Tüm finansal kategorilerinize tek tıkla ulaşın' : 'Access and manage all financial categories in 1-click'}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+          {/* Income Sources */}
+          <button
+            type="button"
+            onClick={onGoToIncomeSources}
+            className="p-4 bg-emerald-50/50 hover:bg-emerald-50 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/40 rounded-2xl border border-emerald-200/70 dark:border-emerald-800/50 text-left transition-all flex items-center justify-between cursor-pointer group shadow-2xs hover:scale-[1.01]"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 flex items-center justify-center shrink-0 font-black">
+                <TrendingUp className="w-5 h-5" />
               </div>
-
-              <button
-                type="button"
-                onClick={onOpenAddIncomeModal}
-                className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 dark:text-emerald-300 rounded-xl text-xs font-bold transition-all cursor-pointer border border-emerald-200/60 dark:border-emerald-800/40"
-              >
-                <Plus className="w-3.5 h-3.5 text-emerald-600" />
-                <span>{language === 'tr' ? '+ Gelir Ekle' : '+ Add'}</span>
-              </button>
-            </div>
-
-            {/* Income Highlights Bar */}
-            <div className="grid grid-cols-2 gap-3 mt-4">
-              <div className="p-3 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-2xl border border-emerald-100 dark:border-emerald-900/30">
-                <span className="text-[10px] font-extrabold uppercase text-emerald-800 dark:text-emerald-300 tracking-wider">
-                  {selectedMonthName} {language === 'tr' ? 'Brüt Gelir' : 'Gross'}
-                </span>
-                <p className="text-lg font-black text-emerald-700 dark:text-emerald-300 mt-0.5">
-                  +{formatCurrency(selectedMonthIncome, currencyCode)}
-                </p>
-              </div>
-
-              <div className="p-3 bg-gray-50 dark:bg-gray-800/40 rounded-2xl border border-gray-100 dark:border-gray-800">
-                <span className="text-[10px] font-extrabold uppercase text-gray-400 tracking-wider">
-                  {language === 'tr' ? 'Tahmini Net Gelir' : 'Est. Net Income'}
-                </span>
-                <p className="text-lg font-black text-gray-900 dark:text-white mt-0.5">
-                  +{formatCurrency(Math.max(0, selectedMonthIncome * 0.78), currencyCode)}
+              <div className="truncate">
+                <p className="text-xs font-black text-gray-900 dark:text-white truncate">{t('monthlyIncomeSources')}</p>
+                <p className="text-[11px] text-emerald-700 dark:text-emerald-400 font-extrabold">
+                  +{formatCurrency(selectedMonthIncome, currencyCode)}{t('perMonth', '/mo')} • {incomes.length} {language === 'tr' ? 'kaynak' : 'sources'}
                 </p>
               </div>
             </div>
+            <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-emerald-600 transition-colors shrink-0" />
+          </button>
 
-            {/* Top Incomes Preview List */}
-            <div className="mt-4 space-y-2">
-              <span className="text-[10px] font-extrabold uppercase tracking-wider text-gray-400">
-                {language === 'tr' ? 'Kayıtlı Gelir Kaynakları Özeti' : 'Income Sources Preview'}
-              </span>
-
-              {incomes.length > 0 ? (
-                incomes.slice(0, 3).map((inc) => (
-                  <div
-                    key={inc.id}
-                    className="p-2.5 bg-gray-50/80 dark:bg-gray-800/40 rounded-xl flex items-center justify-between text-xs border border-gray-100 dark:border-gray-800/60"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="w-7 h-7 rounded-lg bg-emerald-100/70 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 flex items-center justify-center shrink-0 font-bold text-xs">
-                        <DollarSign className="w-3.5 h-3.5" />
-                      </div>
-                      <div className="truncate">
-                        <p className="font-extrabold text-gray-900 dark:text-white truncate">
-                          {translateTitle(inc.name, language)}
-                        </p>
-                        <p className="text-[10px] text-gray-400">
-                          {inc.frequency === 'biweekly' ? t('biweekly') : inc.frequency === 'annual' ? t('annual') : t('monthlyRegular')}
-                        </p>
-                      </div>
-                    </div>
-                    <span className="font-black text-emerald-600 dark:text-emerald-400 shrink-0">
-                      +{formatCurrency(inc.amount, currencyCode)}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <div className="p-4 text-center text-xs text-gray-400 italic bg-gray-50 dark:bg-gray-800/30 rounded-xl">
-                  {language === 'tr' ? 'Henüz gelir kaynağı eklenmedi.' : 'No income sources added yet.'}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Full Page Link */}
-          {onGoToIncomeSources && (
-            <button
-              type="button"
-              onClick={onGoToIncomeSources}
-              className="w-full mt-2 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-emerald-600/20 flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <span>{language === 'tr' ? 'Aylık Gelirleri Yönet & Yeni Kazanç Ekle' : 'Manage Monthly Incomes & Add Earnings'}</span>
-              <ArrowUpRight className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-
-        {/* Right: Saving & Target Funds Summary Widget */}
-        <div className="p-6 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-xs space-y-4 hover:border-blue-200 dark:hover:border-blue-900/40 transition-all flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-2xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
-                  <PiggyBank className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="text-base font-extrabold flex items-center gap-2 text-gray-900 dark:text-white">
-                    <span>{t('savingsTargets')}</span>
-                    <span className="text-xs px-2 py-0.2 rounded-full bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 font-extrabold">
-                      {savings.length}
-                    </span>
-                  </h2>
-                  <p className="text-[11px] text-gray-400 font-medium">
-                    {language === 'tr' ? 'Acil durum, ev, tatil ve birikim hedefleri' : 'Emergency fund, home, travel & savings goals'}
-                  </p>
-                </div>
+          {/* Savings & Target Funds */}
+          <button
+            type="button"
+            onClick={onGoToSavingsFunds}
+            className="p-4 bg-blue-50/50 hover:bg-blue-50 dark:bg-blue-950/20 dark:hover:bg-blue-950/40 rounded-2xl border border-blue-200/70 dark:border-blue-800/50 text-left transition-all flex items-center justify-between cursor-pointer group shadow-2xs hover:scale-[1.01]"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 flex items-center justify-center shrink-0 font-black">
+                <PiggyBank className="w-5 h-5" />
               </div>
-
-              <button
-                type="button"
-                onClick={onOpenAddSavingsModal}
-                className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:hover:bg-blue-900/60 dark:text-blue-300 rounded-xl text-xs font-bold transition-all cursor-pointer border border-blue-200/60 dark:border-blue-800/40"
-              >
-                <Plus className="w-3.5 h-3.5 text-blue-600" />
-                <span>{language === 'tr' ? '+ Hedef Ekle' : '+ Add'}</span>
-              </button>
+              <div className="truncate">
+                <p className="text-xs font-black text-gray-900 dark:text-white truncate">{t('savingsTargets')}</p>
+                <p className="text-[11px] text-blue-700 dark:text-blue-400 font-extrabold">
+                  {formatCurrency(totalMonthlySavings, currencyCode)}{t('perMonth', '/mo')} • {savings.length} {language === 'tr' ? 'hedef fon' : 'funds'}
+                </p>
+              </div>
             </div>
+            <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-blue-600 transition-colors shrink-0" />
+          </button>
 
-            {/* Savings Progress Bar */}
-            {(() => {
-              const totalTargetVal = savings.reduce((acc, s) => acc + (s.targetAmount || 0), 0);
-              const totalCurrentVal = savings.reduce((acc, s) => acc + (s.currentAmount || 0), 0);
-              const overallPct = totalTargetVal > 0 ? Math.min(100, Math.round((totalCurrentVal / totalTargetVal) * 100)) : 0;
-              const monthlyPace = savings.reduce((acc, s) => acc + (s.monthlyContribution || 0), 0);
-
-              return (
-                <div className="mt-4 p-3.5 bg-blue-50/50 dark:bg-blue-950/20 rounded-2xl border border-blue-100 dark:border-blue-900/30 space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-extrabold text-blue-900 dark:text-blue-200">
-                      {formatCurrency(totalCurrentVal, currencyCode)}
-                    </span>
-                    <span className="font-bold text-gray-400">
-                      / {formatCurrency(totalTargetVal, currencyCode)} ({overallPct}%)
-                    </span>
-                  </div>
-
-                  <div className="w-full h-2 bg-blue-100/80 dark:bg-gray-800 rounded-full overflow-hidden">
-                    <div
-                      style={{ width: `${overallPct}%` }}
-                      className="h-full bg-blue-600 rounded-full transition-all duration-500"
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400 font-semibold pt-0.5">
-                    <span>{language === 'tr' ? 'Aylık Ayrılan Birikim:' : 'Monthly Savings Allocation:'}</span>
-                    <strong className="text-blue-600 dark:text-blue-400 font-extrabold">
-                      {formatCurrency(monthlyPace, currencyCode)}/ay
-                    </strong>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Top Savings Preview List */}
-            <div className="mt-4 space-y-2">
-              <span className="text-[10px] font-extrabold uppercase tracking-wider text-gray-400">
-                {language === 'tr' ? 'Öne Çıkan Hedef Fonları' : 'Featured Savings Funds'}
-              </span>
-
-              {savings.length > 0 ? (
-                savings.slice(0, 3).map((sav) => {
-                  const pct = Math.min(100, Math.round(((sav.currentAmount || 0) / (sav.targetAmount || 1)) * 100));
-                  return (
-                    <div
-                      key={sav.id}
-                      className="p-2.5 bg-gray-50/80 dark:bg-gray-800/40 rounded-xl flex items-center justify-between text-xs border border-gray-100 dark:border-gray-800/60"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div className="w-7 h-7 rounded-lg bg-blue-100/70 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 flex items-center justify-center shrink-0 font-bold text-xs">
-                          <Target className="w-3.5 h-3.5" />
-                        </div>
-                        <div className="truncate">
-                          <p className="font-extrabold text-gray-900 dark:text-white truncate">
-                            {translateTitle(sav.title, language)}
-                          </p>
-                          <p className="text-[10px] text-gray-400">
-                            {formatCurrency(sav.currentAmount || 0, currencyCode)} / {formatCurrency(sav.targetAmount || 0, currencyCode)}
-                          </p>
-                        </div>
-                      </div>
-                      <span className="font-black text-blue-600 dark:text-blue-400 shrink-0 text-xs">
-                        %{pct}
-                      </span>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="p-4 text-center text-xs text-gray-400 italic bg-gray-50 dark:bg-gray-800/30 rounded-xl">
-                  {language === 'tr' ? 'Henüz birikim hedefi eklenmedi.' : 'No savings goals added yet.'}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Full Page Link */}
-          {onGoToSavingsFunds && (
-            <button
-              type="button"
-              onClick={onGoToSavingsFunds}
-              className="w-full mt-2 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-blue-600/20 flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <span>{language === 'tr' ? 'Birikim Fonlarını Yönet & Hedef Belirle' : 'Manage Savings Funds & Goals'}</span>
-              <ArrowUpRight className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* 6. Quick Cross-Links to Gider Sayfaları */}
-      <div className="p-5 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-xs">
-        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
-          {t('quickLinksToExpensePages')}
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Regular Payments */}
           <button
             type="button"
             onClick={onGoToRegularPayments}
-            className="p-3.5 bg-amber-50/50 hover:bg-amber-50 dark:bg-amber-950/20 dark:hover:bg-amber-950/40 rounded-2xl border border-amber-200/60 dark:border-amber-900/40 text-left transition-all flex items-center justify-between cursor-pointer group"
+            className="p-4 bg-amber-50/50 hover:bg-amber-50 dark:bg-amber-950/20 dark:hover:bg-amber-950/40 rounded-2xl border border-amber-200/70 dark:border-amber-800/50 text-left transition-all flex items-center justify-between cursor-pointer group shadow-2xs hover:scale-[1.01]"
           >
-            <div className="flex items-center gap-2.5">
-              <Home className="w-5 h-5 text-amber-600" />
-              <div>
-                <p className="text-xs font-black text-gray-900 dark:text-white">{t('regularPaymentsTitle')}</p>
-                <p className="text-[11px] text-amber-700 dark:text-amber-400 font-bold">{formatCurrency(monthlyRegularPaymentsExpense, currencyCode)}{t('perMonth', '/mo')}</p>
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0 font-black">
+                <Home className="w-5 h-5" />
+              </div>
+              <div className="truncate">
+                <p className="text-xs font-black text-gray-900 dark:text-white truncate">{t('regularPaymentsTitle')}</p>
+                <p className="text-[11px] text-amber-700 dark:text-amber-400 font-extrabold">
+                  {formatCurrency(monthlyRegularPaymentsExpense, currencyCode)}{t('perMonth', '/mo')}
+                </p>
               </div>
             </div>
-            <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-amber-600 transition-colors" />
+            <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-amber-600 transition-colors shrink-0" />
           </button>
 
+          {/* Installments */}
           <button
             type="button"
             onClick={onGoToInstallments}
-            className="p-3.5 bg-purple-50/50 hover:bg-purple-50 dark:bg-purple-950/20 dark:hover:bg-purple-950/40 rounded-2xl border border-purple-200/60 dark:border-purple-900/40 text-left transition-all flex items-center justify-between cursor-pointer group"
+            className="p-4 bg-purple-50/50 hover:bg-purple-50 dark:bg-purple-950/20 dark:hover:bg-purple-950/40 rounded-2xl border border-purple-200/70 dark:border-purple-800/50 text-left transition-all flex items-center justify-between cursor-pointer group shadow-2xs hover:scale-[1.01]"
           >
-            <div className="flex items-center gap-2.5">
-              <ShoppingBag className="w-5 h-5 text-purple-600" />
-              <div>
-                <p className="text-xs font-black text-gray-900 dark:text-white">{t('installmentPurchases')}</p>
-                <p className="text-[11px] text-purple-700 dark:text-purple-400 font-bold">{formatCurrency(monthlyInstallmentsExpense, currencyCode)}{t('perMonth', '/mo')}</p>
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 flex items-center justify-center shrink-0 font-black">
+                <ShoppingBag className="w-5 h-5" />
+              </div>
+              <div className="truncate">
+                <p className="text-xs font-black text-gray-900 dark:text-white truncate">{t('installmentPurchases')}</p>
+                <p className="text-[11px] text-purple-700 dark:text-purple-400 font-extrabold">
+                  {formatCurrency(monthlyInstallmentsExpense, currencyCode)}{t('perMonth', '/mo')}
+                </p>
               </div>
             </div>
-            <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-purple-600 transition-colors" />
+            <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-purple-600 transition-colors shrink-0" />
           </button>
 
+          {/* Subscriptions */}
           <button
             type="button"
             onClick={onGoToSubscriptions}
-            className="p-3.5 bg-blue-50/50 hover:bg-blue-50 dark:bg-blue-950/20 dark:hover:bg-blue-950/40 rounded-2xl border border-blue-200/60 dark:border-blue-900/40 text-left transition-all flex items-center justify-between cursor-pointer group"
+            className="p-4 bg-blue-50/50 hover:bg-blue-50 dark:bg-blue-950/20 dark:hover:bg-blue-950/40 rounded-2xl border border-blue-200/70 dark:border-blue-800/50 text-left transition-all flex items-center justify-between cursor-pointer group shadow-2xs hover:scale-[1.01]"
           >
-            <div className="flex items-center gap-2.5">
-              <CreditCard className="w-5 h-5 text-blue-600" />
-              <div>
-                <p className="text-xs font-black text-gray-900 dark:text-white">{t('allSubscriptions')}</p>
-                <p className="text-[11px] text-blue-700 dark:text-blue-400 font-bold">{formatCurrency(monthlySubscriptionsExpense, currencyCode)}{t('perMonth', '/mo')}</p>
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 flex items-center justify-center shrink-0 font-black">
+                <CreditCard className="w-5 h-5" />
+              </div>
+              <div className="truncate">
+                <p className="text-xs font-black text-gray-900 dark:text-white truncate">{t('allSubscriptions')}</p>
+                <p className="text-[11px] text-blue-700 dark:text-blue-400 font-extrabold">
+                  {formatCurrency(monthlySubscriptionsExpense, currencyCode)}{t('perMonth', '/mo')}
+                </p>
               </div>
             </div>
-            <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-blue-600 transition-colors" />
+            <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-blue-600 transition-colors shrink-0" />
+          </button>
+
+          {/* Tax Center */}
+          <button
+            type="button"
+            onClick={onGoToTaxCenter}
+            className="p-4 bg-indigo-50/50 hover:bg-indigo-50 dark:bg-indigo-950/20 dark:hover:bg-indigo-950/40 rounded-2xl border border-indigo-200/70 dark:border-indigo-800/50 text-left transition-all flex items-center justify-between cursor-pointer group shadow-2xs hover:scale-[1.01]"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 flex items-center justify-center shrink-0 font-black">
+                <Landmark className="w-5 h-5" />
+              </div>
+              <div className="truncate">
+                <p className="text-xs font-black text-gray-900 dark:text-white truncate">{language === 'tr' ? 'Vergi Yönetimi & İade' : 'Tax Center & Refund'}</p>
+                <p className="text-[11px] text-indigo-700 dark:text-indigo-400 font-extrabold">
+                  +{formatCurrency(expectedTaxRefund, currencyCode)} {language === 'tr' ? 'iade' : 'refund'} • {currentRegion.flag}
+                </p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-indigo-600 transition-colors shrink-0" />
           </button>
         </div>
       </div>
