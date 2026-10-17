@@ -113,6 +113,8 @@ import {
   markInstallmentEventPaidInGoogleCalendar,
   unmarkInstallmentEventPaidInGoogleCalendar,
   syncRegularPaymentToGoogleCalendar,
+  resolveTargetPeriod,
+  isRegularPaymentPaidForPeriod,
   markRegularPaymentEventPaidInGoogleCalendar,
   markSubscriptionEventPaidInGoogleCalendar,
   connectGoogleCalendar,
@@ -1024,13 +1026,8 @@ export default function App() {
     try {
       const todayStr = new Date().toISOString().split('T')[0];
       const curMonth = format(new Date(), 'yyyy-MM');
-      const paymentPeriod = payment.nextPaymentDate ? payment.nextPaymentDate.slice(0, 7) : curMonth;
-      const isPaid = Boolean(
-        payment.lastPaidMonth === paymentPeriod ||
-        payment.lastPaidMonth === curMonth ||
-        (payment.paidMonths && (payment.paidMonths.includes(paymentPeriod) || payment.paidMonths.includes(curMonth))) ||
-        (payment.paymentHistory && payment.paymentHistory.some(h => h.month === paymentPeriod || h.month === curMonth))
-      );
+      const targetPeriod = resolveTargetPeriod(undefined, payment.nextPaymentDate);
+      const isPaid = isRegularPaymentPaidForPeriod(payment, targetPeriod);
 
       const targetCalId = profile?.calendarSettings?.calendarId || 'primary';
       const result = await syncRegularPaymentToGoogleCalendar(
@@ -1048,6 +1045,7 @@ export default function App() {
           bankOrCard: payment.bankOrCard,
           accountOrSubscriberNo: payment.accountOrSubscriberNo,
           note: payment.note,
+          targetPeriod,
           isPaid
         },
         payment.calendarEventId

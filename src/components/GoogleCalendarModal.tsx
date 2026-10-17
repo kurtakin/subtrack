@@ -26,6 +26,8 @@ import {
   syncEventToGoogleCalendar,
   syncInstallmentToGoogleCalendar,
   syncRegularPaymentToGoogleCalendar,
+  resolveTargetPeriod,
+  isRegularPaymentPaidForPeriod,
   markRegularPaymentEventPaidInGoogleCalendar,
   markInstallmentEventPaidInGoogleCalendar,
   markSubscriptionEventPaidInGoogleCalendar,
@@ -639,14 +641,8 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
     }
     setSingleSyncingId(regPay.id);
     try {
-      const todayStr = new Date().toISOString().split('T')[0];
-      const currentMonthStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-      const isRegDueOrPast = Boolean(regPay.nextPaymentDate && regPay.nextPaymentDate <= todayStr);
-      const isPaidThisMonth = Boolean(
-        (regPay.paidMonths && regPay.paidMonths.includes(currentMonthStr)) ||
-        regPay.lastPaidMonth === currentMonthStr
-      );
-      const isPaid = isPaidThisMonth;
+      const targetPeriod = resolveTargetPeriod(undefined, regPay.nextPaymentDate);
+      const isPaid = isRegularPaymentPaidForPeriod(regPay, targetPeriod);
 
       const result = await syncRegularPaymentToGoogleCalendar(
         token!,
@@ -663,6 +659,7 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
           bankOrCard: regPay.bankOrCard,
           accountOrSubscriberNo: regPay.accountOrSubscriberNo,
           note: regPay.note,
+          targetPeriod,
           isPaid
         },
         regPay.calendarEventId
@@ -740,14 +737,8 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
           await new Promise(r => setTimeout(r, 60));
 
           try {
-            const todayStr = new Date().toISOString().split('T')[0];
-            const currentMonthStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-            const isRegDueOrPast = Boolean(reg.nextPaymentDate && reg.nextPaymentDate <= todayStr);
-            const isPaidThisMonth = Boolean(
-              (reg.paidMonths && reg.paidMonths.includes(currentMonthStr)) ||
-              reg.lastPaidMonth === currentMonthStr
-            );
-            const isPaid = isPaidThisMonth;
+            const targetPeriod = resolveTargetPeriod(undefined, reg.nextPaymentDate);
+            const isPaid = isRegularPaymentPaidForPeriod(reg, targetPeriod);
 
             const result = await syncRegularPaymentToGoogleCalendar(
               token!,
@@ -764,6 +755,7 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
                 bankOrCard: reg.bankOrCard,
                 accountOrSubscriberNo: reg.accountOrSubscriberNo,
                 note: reg.note,
+                targetPeriod,
                 isPaid
               },
               reg.calendarEventId
@@ -832,13 +824,9 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
 
       // 1. Regular payments that are actually paid
       for (const reg of regularPayments) {
-        const regPeriod = reg.nextPaymentDate ? reg.nextPaymentDate.slice(0, 7) : currentMonthStr;
-        const isRegPaid = reg.status === 'active' && Boolean(
-          reg.lastPaidMonth === regPeriod ||
-          reg.lastPaidMonth === currentMonthStr ||
-          (reg.paidMonths && (reg.paidMonths.includes(regPeriod) || reg.paidMonths.includes(currentMonthStr))) ||
-          (reg.paymentHistory && reg.paymentHistory.some(h => h.month === regPeriod || h.month === currentMonthStr))
-        );
+        if (reg.status !== 'active') continue;
+        const targetPeriod = resolveTargetPeriod(undefined, reg.nextPaymentDate);
+        const isRegPaid = isRegularPaymentPaidForPeriod(reg, targetPeriod);
         if (isRegPaid) {
           try {
             const res = await syncRegularPaymentToGoogleCalendar(
@@ -856,6 +844,7 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
                 bankOrCard: reg.bankOrCard,
                 accountOrSubscriberNo: reg.accountOrSubscriberNo,
                 note: reg.note,
+                targetPeriod,
                 isPaid: true
               },
               reg.calendarEventId
@@ -1619,14 +1608,13 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
                   </p>
                   <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1">
                     {activeRegularPayments.map((reg: any) => {
-                      const isRegDueOrPast = reg.nextPaymentDate && reg.nextPaymentDate <= todayStr;
                       const isAuto = Boolean(reg.isAutoPayment);
-                      const isPaidThisMonth = Boolean(
-                        (reg.paidMonths && reg.paidMonths.includes(currentMonthStr)) ||
-                        reg.lastPaidMonth === currentMonthStr
-                      );
-                      const isRegPaid = isPaidThisMonth || isAuto;
-                      const isGreenCard = isRegPaid || isAuto;
+                      let targetPeriod = '';
+                      try {
+                        targetPeriod = resolveTargetPeriod(undefined, reg.nextPaymentDate);
+                      } catch {}
+                      const isRegPaid = targetPeriod ? isRegularPaymentPaidForPeriod(reg, targetPeriod) : false;
+                      const isGreenCard = isRegPaid;
 
                       return (
                         <div 
@@ -1653,11 +1641,7 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
                             </p>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
-                            {isAuto ? (
-                              <span className="px-2 py-0.5 bg-emerald-600 text-white rounded-md font-bold text-[10px] flex items-center gap-1 shadow-xs" title={t('autoPaidGreen')}>
-                                <Check className="w-3 h-3 text-white" /> {t('autoPaidGreen')}
-                              </span>
-                            ) : isRegPaid ? (
+                            {isRegPaid ? (
                               <span className="px-2 py-0.5 bg-emerald-600 text-white rounded-md font-bold text-[10px] flex items-center gap-1 shadow-xs" title={t('paidThisMonthGreen')}>
                                 <Check className="w-3 h-3 text-white" /> {t('paidThisMonthGreen')}
                               </span>

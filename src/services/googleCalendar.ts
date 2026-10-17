@@ -876,7 +876,46 @@ export const syncInstallmentToGoogleCalendar = async (
 };
 
 /**
+ * Resolves the explicit target period (YYYY-MM) for a regular payment.
+ * If targetPeriod is provided and valid, uses it.
+ * Otherwise extracts it strictly from nextPaymentDate (YYYY-MM-DD).
+ * If neither provides a valid period, throws a descriptive error and NEVER defaults to current month.
+ */
+export function resolveTargetPeriod(targetPeriod?: string, nextPaymentDate?: string): string {
+  if (targetPeriod && /^\d{4}-(0[1-9]|1[0-2])$/.test(targetPeriod.trim())) {
+    return targetPeriod.trim();
+  }
+  if (nextPaymentDate && typeof nextPaymentDate === 'string') {
+    const raw = nextPaymentDate.split('T')[0].trim();
+    const match = raw.match(/^(\d{4})-(0[1-9]|1[0-2])/);
+    if (match) {
+      return `${match[1]}-${match[2]}`;
+    }
+  }
+  throw new Error('Düzenli ödeme için hedef dönem belirlenemedi. Lütfen geçerli bir vade tarihi (YYYY-MM-DD) veya hedef dönem (YYYY-MM) belirtin.');
+}
+
+/**
+ * Checks whether a regular payment is actually marked paid for the specified explicit target period.
+ * Auto-payment preference is NOT proof of payment. Current month payment does NOT count for another period.
+ */
+export function isRegularPaymentPaidForPeriod(
+  payment: {
+    lastPaidMonth?: string;
+    paidMonths?: string[];
+    paymentHistory?: Array<{ month: string }>;
+  },
+  targetPeriod: string
+): boolean {
+  if (payment.lastPaidMonth === targetPeriod) return true;
+  if (payment.paidMonths && payment.paidMonths.includes(targetPeriod)) return true;
+  if (payment.paymentHistory && payment.paymentHistory.some(h => h.month === targetPeriod)) return true;
+  return false;
+}
+
+/**
  * Syncs a regular payment (Kira, Fatura, Kişiler, vb.) to Google Calendar using stable source identifier.
+ * Payment status, stable event ID, and budfolPeriod all strictly use the same explicit target period.
  * Auto-payment preference is NOT treated as proof of actual payment.
  * Events are NOT deleted or adopted based on name similarity.
  */
@@ -898,6 +937,8 @@ export const syncRegularPaymentToGoogleCalendar = async (
     isPaid?: boolean;
     lastPaidMonth?: string;
     paidMonths?: string[];
+    paymentHistory?: Array<{ month: string }>;
+    targetPeriod?: string;
   },
   existingEventId?: string
 ): Promise<{ eventId: string; htmlLink?: string }> => {
@@ -905,12 +946,23 @@ export const syncRegularPaymentToGoogleCalendar = async (
     throw new Error('Google erişim anahtarı bulunamadı.');
   }
 
+  // 1. Resolve explicit target period (throws descriptive error if it cannot be determined, never falls back to current month)
+  const targetPeriod = resolveTargetPeriod(payment.targetPeriod, payment.nextPaymentDate);
+
+  // Validate nextPaymentDate format strictly
+  if (!payment.nextPaymentDate || typeof payment.nextPaymentDate !== 'string') {
+    throw new Error('Düzenli ödeme için hedef dönem belirlenemedi: nextPaymentDate eksik veya boş.');
+  }
+  const rawDateStr = payment.nextPaymentDate.split('T')[0].trim();
+  const dateMatch = rawDateStr.match(/^(\d{4})-(0[1-9]|1[0-2])-([0-3]\d)$/);
+  if (!dateMatch) {
+    throw new Error(`Düzenli ödeme vade tarihi YYYY-MM-DD formatında olmalıdır. Alınan değer: "${payment.nextPaymentDate}".`);
+  }
+
   const targetCalId = encodeURIComponent(calendarId || 'primary');
-  const rawDateStr = (payment.nextPaymentDate || '').split('T')[0] || new Date().toISOString().split('T')[0];
-  const parts = rawDateStr.split('-').map(Number);
-  const y = parts[0] || new Date().getFullYear();
-  const m = parts[1] || (new Date().getMonth() + 1);
-  const d = parts[2] || new Date().getDate();
+  const y = Number(dateMatch[1]);
+  const m = Number(dateMatch[2]);
+  const d = Number(dateMatch[3]);
   const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
   const dt = new Date(Date.UTC(y, m - 1, d));
@@ -918,15 +970,13 @@ export const syncRegularPaymentToGoogleCalendar = async (
   const endDateStr = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
   const curr = payment.currency || 'USD';
 
-  const curMonthStr = `${y}-${String(m).padStart(2, '0')}`;
-
-  // CRITICAL: Auto-payment preference is NOT treated as proof of payment!
-  // Only genuine payment marks or paid records count as paid.
-  const isActuallyPaid = Boolean(
-    payment.isPaid || 
-    payment.lastPaidMonth === curMonthStr ||
-    (payment.paidMonths && payment.paidMonths.includes(curMonthStr))
-  );
+  // 2. Determine actual payment status STRICTLY for this targetPeriod.
+  // CRITICAL:
+  // - Auto-payment preference (isAutoPayment) is NOT treated as proof of payment!
+  // - Current month payment does NOT count as payment for a different target period!
+  const isActuallyPaid = payment.isPaid !== undefined
+    ? payment.isPaid
+    : isRegularPaymentPaidForPeriod(payment, targetPeriod);
 
   const categoryLabels: Record<string, string> = {
     rent: '🏠 Kira',
@@ -942,8 +992,11 @@ export const syncRegularPaymentToGoogleCalendar = async (
   };
   const catLabel = categoryLabels[payment.category] || '💳 Aylık Ödeme';
 
-  const stableEventId = generateStableCalendarEventId('reg', payment.id, curMonthStr);
-  const targetEventId = existingEventId || stableEventId;
+  // 3. Kararlı etkinlik kimliği (Stable event ID) MUST use the exact targetPeriod
+  const stableEventId = generateStableCalendarEventId('reg', payment.id, targetPeriod);
+  const targetEventId = (existingEventId && existingEventId.startsWith('budfol') && existingEventId !== stableEventId)
+    ? stableEventId
+    : (existingEventId || stableEventId);
 
   const summary = isActuallyPaid
     ? `✅ [ÖDENDİ] ${payment.name} - ${payment.amount.toFixed(2)} ${curr}${payment.payee ? ` (${payment.payee})` : ''}`
@@ -956,6 +1009,7 @@ export const syncRegularPaymentToGoogleCalendar = async (
       `💵 Tutar: ${payment.amount.toFixed(2)} ${curr}\n` +
       `📅 Vade / Ödeme Tarihi: ${dateStr}\n` +
       `🔄 Ödeme Durumu: Ödendi (Yeşil)\n` +
+      `🎯 Hedef Dönem: ${targetPeriod}\n` +
       (payment.isAutoPayment ? `⚙️ Ödeme Tercihi: Otomatik Ödeme Talimatlı\n` : `⚙️ Ödeme Tercihi: Manuel Ödeme\n`) +
       (payment.accountOrSubscriberNo ? `🔢 Abone/Tesisat/IBAN: ${payment.accountOrSubscriberNo}\n` : '') +
       (payment.bankOrCard ? `🏦 Ödeme Hesabı/Kartı: ${payment.bankOrCard}\n` : '') +
@@ -967,6 +1021,7 @@ export const syncRegularPaymentToGoogleCalendar = async (
       `💵 Tutar: ${payment.amount.toFixed(2)} ${curr}\n` +
       `📅 Vade Tarihi: ${dateStr}\n` +
       `⏳ Ödeme Durumu: Bekliyor / Planlandı\n` +
+      `🎯 Hedef Dönem: ${targetPeriod}\n` +
       (payment.isAutoPayment ? `⚙️ Ödeme Tercihi: Otomatik Ödeme Talimatlı\n` : `⚙️ Ödeme Tercihi: Manuel Ödeme\n`) +
       (payment.accountOrSubscriberNo ? `🔢 Abone/Tesisat/IBAN: ${payment.accountOrSubscriberNo}\n` : '') +
       (payment.bankOrCard ? `🏦 Ödeme Hesabı/Kartı: ${payment.bankOrCard}\n` : '') +
@@ -994,7 +1049,7 @@ export const syncRegularPaymentToGoogleCalendar = async (
         budfolApp: 'budfol',
         budfolType: 'regular_payment',
         budfolRecordId: payment.id,
-        budfolPeriod: curMonthStr
+        budfolPeriod: targetPeriod
       }
     },
     transparency: 'transparent'
