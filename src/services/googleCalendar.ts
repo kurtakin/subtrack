@@ -138,7 +138,37 @@ export const fetchExistingSubTrackEvents = async (
   }
 };
 
+/**
+ * Generates a deterministic, collision-resistant Google Calendar event ID.
+ * Google Calendar API event ID rules: characters in [a-v0-9], length 5 to 1024.
+ */
+export function generateStableCalendarEventId(
+  recordType: 'sub' | 'inst' | 'reg' | 'tax',
+  recordId: string,
+  periodKey: string = 'default'
+): string {
+  const rawKey = `budfol_${recordType}_${recordId}_${periodKey}`.toLowerCase();
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < rawKey.length; i++) {
+    const ch = rawKey.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  const part1 = (h1 >>> 0).toString(16).padStart(8, '0');
+  const part2 = (h2 >>> 0).toString(16).padStart(8, '0');
+
+  const sanitizedId = recordId.toLowerCase().replace(/[^a-v0-9]/g, '').slice(0, 20);
+  const sanitizedPeriod = periodKey.toLowerCase().replace(/[^a-v0-9]/g, '').slice(0, 10);
+
+  const eventId = `budfol${recordType.slice(0, 4)}${sanitizedId}${sanitizedPeriod}${part1}${part2}`;
+  return eventId.replace(/[^a-v0-9]/g, '').slice(0, 64);
+}
+
 export interface CalendarSyncPayload {
+  id?: string;
   name: string;
   amount: number;
   currency: string;
@@ -149,9 +179,11 @@ export interface CalendarSyncPayload {
   note?: string;
   isAutoPayment?: boolean;
   isPaid?: boolean;
+  periodKey?: string;
 }
 
 export interface InstallmentCalendarSyncPayload {
+  id?: string;
   name: string;
   store: string;
   totalAmount: number;
@@ -170,9 +202,10 @@ export interface InstallmentCalendarSyncPayload {
 
 /**
  * Creates or updates an event in the user's selected Google Calendar.
- * Configured with 1-day advance alarm (1440 minutes) via popup and email reminder.
- * Repeating rule: RRULE:FREQ=MONTHLY for monthly subscriptions, RRULE:FREQ=YEARLY for yearly.
- * If subscription is on auto-payment or paid, it is highlighted in Basil Green (colorId: 10).
+ * Uses a stable source identifier (deterministic ID + record ID + periodKey) so re-syncing
+ * updates the existing event rather than creating duplicates.
+ * Auto-payment preference is NOT treated as proof of actual payment.
+ * Events are NOT deleted or adopted based on title/name similarity.
  */
 export const syncEventToGoogleCalendar = async (
   accessToken: string,
@@ -203,28 +236,40 @@ export const syncEventToGoogleCalendar = async (
 
   const recurrenceRule = payload.billingCycle === 'yearly' ? 'RRULE:FREQ=YEARLY' : 'RRULE:FREQ=MONTHLY';
   const curr = payload.currency || 'USD';
-  const isGreen = Boolean(payload.isPaid || payload.isAutoPayment);
+
+  // CRITICAL: Auto-payment preference is NOT treated as proof of payment.
+  // An event only gets green / paid status if payload.isPaid is true.
+  const isGreen = Boolean(payload.isPaid);
+
+  const periodKey = payload.periodKey || `${y}-${String(m).padStart(2, '0')}`;
+  const recordId = payload.id || payload.name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const stableId = generateStableCalendarEventId('sub', recordId, periodKey);
+  const targetEventId = existingEventId || stableId;
 
   const buildEventBody = (useCustomReminders = true) => ({
+    id: targetEventId,
     summary: isGreen
-      ? `✅ [ÖDENDİ${payload.isAutoPayment ? ' - Otomatik Ödeme' : ''}] ${payload.name} - ${payload.amount.toFixed(2)} ${curr}`
-      : `🔔 [SubTrack] ${payload.name} - ${payload.amount.toFixed(2)} ${curr}`,
+      ? `✅ [ÖDENDİ] ${payload.name} - ${payload.amount.toFixed(2)} ${curr}`
+      : `🔔 [Budfol] ${payload.name} - ${payload.amount.toFixed(2)} ${curr}`,
     description: isGreen
-      ? `✅ SUBTRACK OTOMATİK ABONELİK PLANI\n\n` +
+      ? `✅ BUDFOL ABONELİK ÖDEMESİ\n\n` +
         `📌 Servis / Abonelik: ${payload.name}\n` +
         `💳 Tutar: ${payload.amount.toFixed(2)} ${curr}\n` +
         `🏷️ Kategori: ${payload.category}\n` +
         `🔄 Dönem: ${payload.billingCycle === 'monthly' ? 'Aylık' : 'Yıllık'}\n` +
-        `🔄 Ödeme Durumu: Otomatik Ödeme Talimatı Aktif (Yeşil - Ödendi)\n` +
+        `🔄 Ödeme Durumu: Ödendi (Yeşil)\n` +
+        (payload.isAutoPayment ? `⚙️ Ödeme Tercihi: Otomatik Ödeme Talimatlı\n` : `⚙️ Ödeme Tercihi: Manuel Ödeme\n`) +
         (payload.note ? `📝 Not: ${payload.note}\n` : '') +
-        `\nBu etkinlik SubTrack uygulaması tarafından otomatik ödeme kapsamında takviminizde yeşil olarak işaretlenmiştir.`
-      : `SubTrack Otomatik Fatura & Abonelik Hatırlatıcı\n\n` +
+        `\nBu etkinlik Budfol uygulaması tarafından takviminizde güncellenmiştir.`
+      : `Budfol Fatura & Abonelik Hatırlatıcı\n\n` +
         `📌 Servis / Abonelik: ${payload.name}\n` +
         `💳 Tutar: ${payload.amount.toFixed(2)} ${curr}\n` +
         `🏷️ Kategori: ${payload.category}\n` +
         `🔄 Dönem: ${payload.billingCycle === 'monthly' ? 'Aylık' : 'Yıllık'}\n` +
+        `⏳ Ödeme Durumu: Bekliyor / Planlandı\n` +
+        (payload.isAutoPayment ? `⚙️ Ödeme Tercihi: Otomatik Ödeme Talimatlı\n` : `⚙️ Ödeme Tercihi: Manuel Ödeme\n`) +
         (payload.note ? `📝 Not: ${payload.note}\n` : '') +
-        `\nBu etkinlik SubTrack uygulaması tarafından 1 gün öncesine alarmlı olarak otomatik senkronize edilmiştir.`,
+        `\nBu etkinlik Budfol uygulaması tarafından 1 gün öncesine alarmlı olarak senkronize edilmiştir.`,
     start: {
       date: startDateStr
     },
@@ -233,7 +278,6 @@ export const syncEventToGoogleCalendar = async (
     },
     recurrence: [recurrenceRule],
     colorId: isGreen ? '10' : '6', // 10 = Basil (Forest Green), 6 = Tangerine
-    // Google Calendar universally supports popup reminders. Email reminder can fail on accounts without email notification support.
     reminders: isGreen
       ? { useDefault: false, overrides: [] }
       : useCustomReminders
@@ -246,82 +290,24 @@ export const syncEventToGoogleCalendar = async (
       : {
           useDefault: true
         },
+    extendedProperties: {
+      private: {
+        budfolApp: 'budfol',
+        budfolType: 'subscription',
+        budfolRecordId: recordId,
+        budfolPeriod: periodKey
+      }
+    },
     transparency: 'transparent'
   });
 
-  let targetEventId = existingEventId;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
 
   try {
-    // 1. If existingEventId is provided, verify it on Google Calendar
-    if (existingEventId) {
-      try {
-        const verifyRes = await fetch(
-          `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${existingEventId}`,
-          { headers: { Authorization: `Bearer ${accessToken}` }, signal: controller.signal }
-        );
-        if (verifyRes.ok) {
-          const item = await verifyRes.json();
-          if (item && item.status !== 'cancelled') {
-            targetEventId = item.id;
-          } else {
-            targetEventId = undefined;
-          }
-        } else if (verifyRes.status === 404) {
-          targetEventId = undefined;
-        }
-      } catch {}
-    }
-
-    // 2. Search Google Calendar for events matching this subscription to deduplicate
-    try {
-      const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events?maxResults=100&q=${encodeURIComponent(payload.name)}`;
-      const searchRes = await fetch(searchUrl, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-        signal: controller.signal
-      });
-      if (searchRes.ok) {
-        const searchData = await searchRes.json();
-        const items = searchData.items || [];
-        const cleanTargetName = payload.name.trim().toLowerCase();
-        const matched = items.filter((it: any) => 
-          (existingEventId && it.id === existingEventId) ||
-          (it.summary && it.summary.toLowerCase().includes(cleanTargetName)) ||
-          (it.description && it.description.toLowerCase().includes(cleanTargetName))
-        );
-
-        if (matched.length > 0) {
-          if (!targetEventId) {
-            targetEventId = matched[0].id;
-          }
-
-          // Clean up duplicate/excess events found for this subscription so only 1 card remains
-          for (let idx = 0; idx < matched.length; idx++) {
-            const dupId = matched[idx].id;
-            if (dupId && dupId !== targetEventId) {
-              fetch(`https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${dupId}`, {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${accessToken}` }
-              }).catch(() => {});
-            }
-          }
-        }
-      }
-    } catch (searchErr) {
-      console.warn('Could not search/clean duplicate calendar events:', searchErr);
-    }
-
-    let url = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events`;
-    let method = 'POST';
-
-    if (targetEventId) {
-      url = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${targetEventId}`;
-      method = 'PUT';
-    }
-
-    let response = await fetch(url, {
-      method,
+    const putUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${targetEventId}`;
+    let response = await fetch(putUrl, {
+      method: 'PUT',
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
@@ -330,10 +316,10 @@ export const syncEventToGoogleCalendar = async (
       signal: controller.signal
     });
 
-    // If custom reminder fails with 400 Bad Request, retry with useDefault: true
+    // If PUT returns 400 with custom reminders, retry PUT with useDefault: true
     if (!response.ok && response.status === 400) {
-      response = await fetch(url, {
-        method,
+      response = await fetch(putUrl, {
+        method: 'PUT',
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
@@ -343,12 +329,11 @@ export const syncEventToGoogleCalendar = async (
       });
     }
 
-    // If PUT on targetEventId returned 404 (event was deleted on Google Calendar), fall back to POST
-    if (!response.ok && response.status === 404 && targetEventId) {
-      url = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events`;
-      method = 'POST';
-      response = await fetch(url, {
-        method,
+    // If event does not exist yet (404), create it via POST
+    if (response.status === 404) {
+      const postUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events`;
+      response = await fetch(postUrl, {
+        method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
@@ -356,6 +341,31 @@ export const syncEventToGoogleCalendar = async (
         body: JSON.stringify(buildEventBody(true)),
         signal: controller.signal
       });
+
+      if (!response.ok && response.status === 400) {
+        response = await fetch(postUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(buildEventBody(false)),
+          signal: controller.signal
+        });
+      }
+
+      // If POST returns 409 Conflict, event was created concurrently; update it with PUT
+      if (response.status === 409) {
+        response = await fetch(putUrl, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(buildEventBody(true)),
+          signal: controller.signal
+        });
+      }
     }
 
     if (!response.ok) {
@@ -370,7 +380,7 @@ export const syncEventToGoogleCalendar = async (
 
     const resJson = await response.json();
     return {
-      eventId: resJson.id,
+      eventId: resJson.id || targetEventId,
       htmlLink: resJson.htmlLink
     };
   } catch (err: any) {
@@ -434,6 +444,13 @@ export interface InstallmentMonthlySyncResult {
  * e.g. "[Taksit 9/24] iPhone 16 Pro Max", "[Taksit 10/24] ...", ..., "[Taksit 24/24 - Son Taksit! 🎉]"
  * Each event has 1-day advance alarm and detailed balance breakdown.
  */
+/**
+ * Creates or updates individual monthly events in Google Calendar for installment months.
+ * Uses a stable source identifier (deterministic ID + record ID + month number) so re-syncing
+ * updates existing events rather than duplicating them.
+ * Auto-payment preference is NOT treated as proof of actual payment.
+ * Events are NOT deleted or adopted based on name similarity.
+ */
 export const syncInstallmentMonthlyEventsToGoogleCalendar = async (
   accessToken: string,
   calendarId: string,
@@ -445,36 +462,6 @@ export const syncInstallmentMonthlyEventsToGoogleCalendar = async (
   }
 
   const targetCalId = encodeURIComponent(calendarId || 'primary');
-
-  // 1. If previous event IDs exist, clean them up first so calendar has no orphaned/duplicate events
-  if (previousEventIds) {
-    await deleteInstallmentCalendarEvents(accessToken, calendarId, previousEventIds).catch(() => {});
-  }
-
-  // 2. Also search Google Calendar for existing events with this installment name to delete old duplicates
-  try {
-    const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events?maxResults=100&q=${encodeURIComponent(payload.name)}`;
-    const searchRes = await fetch(searchUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
-    if (searchRes.ok) {
-      const searchData = await searchRes.json();
-      const items = searchData.items || [];
-      const cleanName = payload.name.trim().toLowerCase();
-      const matched = items.filter((it: any) =>
-        (it.summary && it.summary.toLowerCase().includes(cleanName)) ||
-        (it.description && it.description.toLowerCase().includes(cleanName))
-      );
-      for (const m of matched) {
-        if (m.id) {
-          fetch(`https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${m.id}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${accessToken}` }
-          }).catch(() => {});
-        }
-      }
-    }
-  } catch {}
 
   const total = Math.max(1, payload.totalInstallments || 1);
   const paid = Math.max(0, payload.paidInstallments || 0);
@@ -495,6 +482,7 @@ export const syncInstallmentMonthlyEventsToGoogleCalendar = async (
 
   const createdEventIds: string[] = [];
   const eventMap: Record<number, string> = {};
+  const recordId = payload.id || payload.name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 
   for (let i = 0; i < countToCreate; i++) {
     const currentInstNum = startInstNumber + i;
@@ -514,22 +502,32 @@ export const syncInstallmentMonthlyEventsToGoogleCalendar = async (
 
     const paidUpToThis = currentInstNum * (payload.monthlyAmount || 0);
     const remainingDebtAfterThis = remainingAfterThis * (payload.monthlyAmount || 0);
-    const isInstAuto = Boolean(payload.isPaid || payload.isAutoPayment);
+
+    // CRITICAL: Auto-payment preference is NOT treated as proof of payment!
+    // A future installment is only marked paid if currentInstNum <= paidInstallments or payload.isPaid is true.
+    const isThisInstPaid = Boolean(payload.isPaid || currentInstNum <= paid);
+
+    const periodKey = `inst_${currentInstNum}`;
+    const stableInstEventId = generateStableCalendarEventId('inst', recordId, periodKey);
+    const prevId = Array.isArray(previousEventIds) ? previousEventIds[i] : (i === 0 ? previousEventIds : undefined);
+    const targetEventId = prevId || stableInstEventId;
 
     const buildEventBody = (useCustomReminders = true) => ({
-      summary: isInstAuto
-        ? `✅ [ÖDENDİ${payload.isAutoPayment ? ' - Otomatik Ödeme' : ''} - Taksit ${currentInstNum}/${total}${isLast ? ' - Son Taksit! 🎉' : ''}] ${payload.name} - ${payload.monthlyAmount.toFixed(2)} ${curr}${storeInfo}`
+      id: targetEventId,
+      summary: isThisInstPaid
+        ? `✅ [ÖDENDİ - Taksit ${currentInstNum}/${total}${isLast ? ' - Son Taksit! 🎉' : ''}] ${payload.name} - ${payload.monthlyAmount.toFixed(2)} ${curr}${storeInfo}`
         : `🔔 [Taksit ${currentInstNum}/${total}${isLast ? ' - Son Taksit! 🎉' : ''}] ${payload.name} - ${payload.monthlyAmount.toFixed(2)} ${curr}${storeInfo}`,
-      description: isInstAuto
-        ? `✅ BU TAKSİT OTOMATİK ÖDEME KAPSAMINDA SUBTRACK TARAFINDAN ÖDENDİ OLARAK KAYDEDİLMİŞTİR!\n\n` +
+      description: isThisInstPaid
+        ? `✅ BU TAKSİT BUDFOL TARAFINDAN ÖDENDİ OLARAK KAYDEDİLMİŞTİR!\n\n` +
           `📦 Ürün / Hizmet: ${payload.name}\n` +
           (payload.store ? `🏬 Satıcı / Firma: ${payload.store}\n` : '') +
           `💳 Taksit Bilgisi: ${currentInstNum}. Taksit / Toplam ${total}\n` +
-          `💵 Bu Ayki Taksit Tutarı: ${payload.monthlyAmount.toFixed(2)} ${curr}\n` +
-          `🔄 Ödeme Türü: Otomatik Ödeme Talimatı ile Ödendi (Yeşil)\n` +
+          `💵 Taksit Tutarı: ${payload.monthlyAmount.toFixed(2)} ${curr}\n` +
+          `🔄 Ödeme Durumu: Ödendi (Yeşil)\n` +
+          (payload.isAutoPayment ? `⚙️ Ödeme Tercihi: Otomatik Ödeme Talimatlı\n` : `⚙️ Ödeme Tercihi: Manuel Ödeme\n`) +
           (payload.bankOrCard ? `🏦 Ödeme Kartı / Banka: ${payload.bankOrCard}\n` : '') +
           (payload.note ? `📝 Not: ${payload.note}\n` : '')
-        : `SubTrack Taksitli Alışveriş Hatırlatıcı\n\n` +
+        : `Budfol Taksitli Harcama Hatırlatıcı\n\n` +
           `📦 Ürün / Hizmet: ${payload.name}\n` +
           (payload.store ? `🏬 Satıcı / Firma: ${payload.store}\n` : '') +
           `💳 Taksit Bilgisi: ${currentInstNum}. Taksit / Toplam ${total} (${isLast ? 'Bu ay ile taksitleriniz tamamlanıyor! 🎉' : `Kalan: ${remainingAfterThis} taksit`})\n` +
@@ -537,17 +535,18 @@ export const syncInstallmentMonthlyEventsToGoogleCalendar = async (
           `📊 Toplam Ürün Değeri: ${payload.totalAmount.toFixed(2)} ${curr}\n` +
           `   • Bu Taksite Kadar Ödenen: ${paidUpToThis.toFixed(2)} ${curr}\n` +
           `   • Kalan Borç (Bu Taksit Sonrası): ${remainingDebtAfterThis.toFixed(2)} ${curr}\n` +
+          (payload.isAutoPayment ? `⚙️ Ödeme Tercihi: Otomatik Ödeme Talimatlı\n` : `⚙️ Ödeme Tercihi: Manuel Ödeme\n`) +
           (payload.bankOrCard ? `🏦 Ödeme Kartı / Banka: ${payload.bankOrCard}\n` : '') +
           (payload.note ? `📝 Not: ${payload.note}\n` : '') +
-          `\nBu taksit etkinliği SubTrack uygulaması tarafından 1 gün öncesine alarmlı olarak Google Takviminize eklenmiştir.`,
+          `\nBu taksit etkinliği Budfol uygulaması tarafından 1 gün öncesine alarmlı olarak Google Takviminize eklenmiştir.`,
       start: {
         date: startDateStr
       },
       end: {
         date: endDateStr
       },
-      colorId: isInstAuto ? '10' : '6', // 10 = Basil (Forest Green), 6 = Tangerine
-      reminders: isInstAuto
+      colorId: isThisInstPaid ? '10' : '6', // 10 = Basil (Forest Green), 6 = Tangerine
+      reminders: isThisInstPaid
         ? { useDefault: false, overrides: [] }
         : useCustomReminders
         ? {
@@ -559,16 +558,24 @@ export const syncInstallmentMonthlyEventsToGoogleCalendar = async (
         : {
             useDefault: true
           },
+      extendedProperties: {
+        private: {
+          budfolApp: 'budfol',
+          budfolType: 'installment',
+          budfolRecordId: recordId,
+          budfolPeriod: periodKey
+        }
+      },
       transparency: 'transparent'
     });
 
-    const url = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6000);
 
     try {
-      let response = await fetch(url, {
-        method: 'POST',
+      const putUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${targetEventId}`;
+      let response = await fetch(putUrl, {
+        method: 'PUT',
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
@@ -578,8 +585,8 @@ export const syncInstallmentMonthlyEventsToGoogleCalendar = async (
       });
 
       if (!response.ok && response.status === 400) {
-        response = await fetch(url, {
-          method: 'POST',
+        response = await fetch(putUrl, {
+          method: 'PUT',
           headers: {
             Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json'
@@ -587,6 +594,44 @@ export const syncInstallmentMonthlyEventsToGoogleCalendar = async (
           body: JSON.stringify(buildEventBody(false)),
           signal: controller.signal
         });
+      }
+
+      // If event does not exist yet (404), create it via POST
+      if (response.status === 404) {
+        const postUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events`;
+        response = await fetch(postUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(buildEventBody(true)),
+          signal: controller.signal
+        });
+
+        if (!response.ok && response.status === 400) {
+          response = await fetch(postUrl, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(buildEventBody(false)),
+            signal: controller.signal
+          });
+        }
+
+        if (response.status === 409) {
+          response = await fetch(putUrl, {
+            method: 'PUT',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(buildEventBody(true)),
+            signal: controller.signal
+          });
+        }
       }
 
       if (!response.ok) {
@@ -600,9 +645,10 @@ export const syncInstallmentMonthlyEventsToGoogleCalendar = async (
       }
 
       const resJson = await response.json();
-      if (resJson.id) {
-        createdEventIds.push(resJson.id);
-        eventMap[currentInstNum] = resJson.id;
+      const savedId = resJson.id || targetEventId;
+      if (savedId) {
+        createdEventIds.push(savedId);
+        eventMap[currentInstNum] = savedId;
       }
     } catch (err: any) {
       if (err.name === 'AbortError') {
@@ -830,9 +876,9 @@ export const syncInstallmentToGoogleCalendar = async (
 };
 
 /**
- * Syncs a regular payment (Kira, Fatura, Kişiler, vb.) to Google Calendar.
- * If the payment is already paid or its due date has arrived under auto-payment, it is created/updated in Green (colorId: 10).
- * Otherwise it is created with 1-day prior alert in Tangerine (colorId: 6).
+ * Syncs a regular payment (Kira, Fatura, Kişiler, vb.) to Google Calendar using stable source identifier.
+ * Auto-payment preference is NOT treated as proof of actual payment.
+ * Events are NOT deleted or adopted based on name similarity.
  */
 export const syncRegularPaymentToGoogleCalendar = async (
   accessToken: string,
@@ -855,6 +901,10 @@ export const syncRegularPaymentToGoogleCalendar = async (
   },
   existingEventId?: string
 ): Promise<{ eventId: string; htmlLink?: string }> => {
+  if (!accessToken) {
+    throw new Error('Google erişim anahtarı bulunamadı.');
+  }
+
   const targetCalId = encodeURIComponent(calendarId || 'primary');
   const rawDateStr = (payment.nextPaymentDate || '').split('T')[0] || new Date().toISOString().split('T')[0];
   const parts = rawDateStr.split('-').map(Number);
@@ -868,11 +918,12 @@ export const syncRegularPaymentToGoogleCalendar = async (
   const endDateStr = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
   const curr = payment.currency || 'USD';
 
-  const todayStr = new Date().toISOString().split('T')[0];
   const curMonthStr = `${y}-${String(m).padStart(2, '0')}`;
-  const isPaidOrAutoPaid = Boolean(
+
+  // CRITICAL: Auto-payment preference is NOT treated as proof of payment!
+  // Only genuine payment marks or paid records count as paid.
+  const isActuallyPaid = Boolean(
     payment.isPaid || 
-    payment.isAutoPayment ||
     payment.lastPaidMonth === curMonthStr ||
     (payment.paidMonths && payment.paidMonths.includes(curMonthStr))
   );
@@ -891,39 +942,45 @@ export const syncRegularPaymentToGoogleCalendar = async (
   };
   const catLabel = categoryLabels[payment.category] || '💳 Aylık Ödeme';
 
-  const summary = isPaidOrAutoPaid
-    ? `✅ [ÖDENDİ${payment.isAutoPayment ? ' - Otomatik Ödeme' : ''}] ${payment.name} - ${payment.amount.toFixed(2)} ${curr}${payment.payee ? ` (${payment.payee})` : ''}`
+  const stableEventId = generateStableCalendarEventId('reg', payment.id, curMonthStr);
+  const targetEventId = existingEventId || stableEventId;
+
+  const summary = isActuallyPaid
+    ? `✅ [ÖDENDİ] ${payment.name} - ${payment.amount.toFixed(2)} ${curr}${payment.payee ? ` (${payment.payee})` : ''}`
     : `🔔 [${catLabel}] ${payment.name} - ${payment.amount.toFixed(2)} ${curr}${payment.payee ? ` (${payment.payee})` : ''}`;
 
-  const description = isPaidOrAutoPaid
-    ? `✅ BU DÜZENLİ ÖDEME SUBTRACK TARAFINDAN BAŞARIYLA ÖDENDİ OLARAK KAYDEDİLDİ!\n\n` +
+  const description = isActuallyPaid
+    ? `✅ BU DÜZENLİ ÖDEME BUDFOL TARAFINDAN ÖDENDİ OLARAK KAYDEDİLDİ!\n\n` +
       `🏷️ Ödeme: ${payment.name}\n` +
       (payment.payee ? `🏢 Alıcı: ${payment.payee}\n` : '') +
       `💵 Tutar: ${payment.amount.toFixed(2)} ${curr}\n` +
       `📅 Vade / Ödeme Tarihi: ${dateStr}\n` +
-      (payment.isAutoPayment ? `🔄 Ödeme Türü: Otomatik Ödeme Talimatı ile Ödendi (Yeşil)\n` : `✋ Ödeme Türü: Manuel Ödendi\n`) +
+      `🔄 Ödeme Durumu: Ödendi (Yeşil)\n` +
+      (payment.isAutoPayment ? `⚙️ Ödeme Tercihi: Otomatik Ödeme Talimatlı\n` : `⚙️ Ödeme Tercihi: Manuel Ödeme\n`) +
       (payment.accountOrSubscriberNo ? `🔢 Abone/Tesisat/IBAN: ${payment.accountOrSubscriberNo}\n` : '') +
       (payment.bankOrCard ? `🏦 Ödeme Hesabı/Kartı: ${payment.bankOrCard}\n` : '') +
       (payment.note ? `📝 Not: ${payment.note}\n` : '') +
-      `\nBu ödemenin günü geldiğinde SubTrack tarafından yeşil renkle (Ödendi) güncellenmiştir.`
-    : `📌 AYLIK DÜZENLİ ÖDEME HATIRLATMASI (SubTrack)\n\n` +
+      `\nBu etkinlik Budfol tarafından Google Takvim'de güncellenmiştir.`
+    : `📌 AYLIK DÜZENLİ ÖDEME HATIRLATMASI (Budfol)\n\n` +
       `🏷️ Ödeme: ${payment.name}\n` +
       (payment.payee ? `🏢 Alıcı: ${payment.payee}\n` : '') +
       `💵 Tutar: ${payment.amount.toFixed(2)} ${curr}\n` +
       `📅 Vade Tarihi: ${dateStr}\n` +
-      (payment.isAutoPayment ? `🔄 Ödeme Türü: Otomatik Ödeme Talimatlı\n` : `✋ Ödeme Türü: Manuel Ödeme (EFT/Havale)\n`) +
+      `⏳ Ödeme Durumu: Bekliyor / Planlandı\n` +
+      (payment.isAutoPayment ? `⚙️ Ödeme Tercihi: Otomatik Ödeme Talimatlı\n` : `⚙️ Ödeme Tercihi: Manuel Ödeme\n`) +
       (payment.accountOrSubscriberNo ? `🔢 Abone/Tesisat/IBAN: ${payment.accountOrSubscriberNo}\n` : '') +
       (payment.bankOrCard ? `🏦 Ödeme Hesabı/Kartı: ${payment.bankOrCard}\n` : '') +
       (payment.note ? `📝 Not: ${payment.note}\n` : '') +
-      `\nBu etkinlik SubTrack tarafından 1 gün öncesine alarmlı olarak takviminize eklenmiştir.`;
+      `\nBu etkinlik Budfol tarafından 1 gün öncesine alarmlı olarak takviminize eklenmiştir.`;
 
   const eventBody = {
+    id: targetEventId,
     summary,
     description,
     start: { date: dateStr },
     end: { date: endDateStr },
-    colorId: isPaidOrAutoPaid ? '10' : '6', // 10 = Basil (Forest Green), 6 = Tangerine (Orange)
-    reminders: isPaidOrAutoPaid
+    colorId: isActuallyPaid ? '10' : '6', // 10 = Basil (Forest Green), 6 = Tangerine (Orange)
+    reminders: isActuallyPaid
       ? { useDefault: false, overrides: [] }
       : {
           useDefault: false,
@@ -931,98 +988,223 @@ export const syncRegularPaymentToGoogleCalendar = async (
             { method: 'popup', minutes: 1440 }, // 1 day before
             { method: 'popup', minutes: 120 }   // 2 hours before
           ]
-        }
+        },
+    extendedProperties: {
+      private: {
+        budfolApp: 'budfol',
+        budfolType: 'regular_payment',
+        budfolRecordId: payment.id,
+        budfolPeriod: curMonthStr
+      }
+    },
+    transparency: 'transparent'
   };
 
-  let targetEventId = existingEventId;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-  // 1. If existingEventId is provided, verify it exists
-  if (existingEventId) {
-    try {
-      const verifyRes = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${existingEventId}`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-      if (verifyRes.ok) {
-        const item = await verifyRes.json();
-        if (item && item.status !== 'cancelled') {
-          targetEventId = item.id;
-        } else {
-          targetEventId = undefined;
-        }
-      } else if (verifyRes.status === 404) {
-        targetEventId = undefined;
-      }
-    } catch {}
-  }
-
-  // 2. Search Google Calendar for matching regular payments to deduplicate
   try {
-    const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events?maxResults=100&q=${encodeURIComponent(payment.name)}`;
-    const searchRes = await fetch(searchUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` }
+    const putUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${targetEventId}`;
+    let res = await fetch(putUrl, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(eventBody),
+      signal: controller.signal
     });
-    if (searchRes.ok) {
-      const searchData = await searchRes.json();
-      const items = searchData.items || [];
-      const cleanName = payment.name.trim().toLowerCase();
-      const matched = items.filter((it: any) =>
-        (existingEventId && it.id === existingEventId) ||
-        (it.summary && it.summary.toLowerCase().includes(cleanName))
-      );
 
-      if (matched.length > 0) {
-        if (!targetEventId) {
-          targetEventId = matched[0].id;
-        }
-
-        // Clean up any extra duplicate cards for this payment
-        for (let idx = 0; idx < matched.length; idx++) {
-          const dupId = matched[idx].id;
-          if (dupId && dupId !== targetEventId) {
-            fetch(`https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${dupId}`, {
-              method: 'DELETE',
-              headers: { Authorization: `Bearer ${accessToken}` }
-            }).catch(() => {});
-          }
-        }
-      }
-    }
-  } catch {}
-
-  // 3. Update existing event or create if not present
-  if (targetEventId) {
-    try {
-      const url = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${targetEventId}`;
-      const res = await fetch(url, {
-        method: 'PATCH',
+    if (res.status === 404) {
+      const postUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events`;
+      res = await fetch(postUrl, {
+        method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(eventBody)
+        body: JSON.stringify(eventBody),
+        signal: controller.signal
       });
-      if (res.ok) {
-        const data = await res.json();
-        return { eventId: data.id, htmlLink: data.htmlLink };
+
+      if (res.status === 409) {
+        res = await fetch(putUrl, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(eventBody),
+          signal: controller.signal
+        });
       }
-    } catch {}
+    }
+
+    if (!res.ok) {
+      if (res.status === 401) {
+        setCachedAccessToken(null);
+        throw new Error('Oturum süresi doldu (401). Lütfen Google Takvim bağlantısını yenileyin.');
+      }
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error?.message || `Takvim etkinliği oluşturulamadı (${res.status})`);
+    }
+
+    const data = await res.json();
+    return { eventId: data.id || targetEventId, htmlLink: data.htmlLink };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+export interface TaxCalendarSyncPayload {
+  id: string; // unique stable identifier e.g. "ca_individual_filing_2026" or tax year record ID
+  title: string;
+  countryCode: string;
+  taxAuthority?: string;
+  date: string; // strictly ISO YYYY-MM-DD
+  type: 'statutory_milestone' | 'declaration_filing';
+  description?: string;
+  isCompleted?: boolean;
+}
+
+/**
+ * Syncs a tax declaration or user-selected statutory tax milestone to Google Calendar.
+ * Strictly verifies date format (YYYY-MM-DD); does NOT invent or guess dates.
+ * Uses a stable source identifier so re-syncing updates existing events without duplicates.
+ * Does NOT delete or claim other events based on title/name similarity.
+ */
+export const syncTaxMilestoneToGoogleCalendar = async (
+  accessToken: string,
+  calendarId: string,
+  payload: TaxCalendarSyncPayload,
+  existingEventId?: string
+): Promise<{ eventId: string; htmlLink?: string }> => {
+  if (!accessToken) {
+    throw new Error('Google erişim anahtarı bulunamadı.');
   }
 
-  const createUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events`;
-  const createRes = await fetch(createUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(eventBody)
-  });
-  if (!createRes.ok) {
-    throw new Error('Google Takvim etkinliği oluşturulamadı');
+  // Strict date format verification: strictly ISO YYYY-MM-DD
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (!payload.date || !datePattern.test(payload.date)) {
+    throw new Error(`Geçerli bir vergi tarihi (YYYY-MM-DD) gereklidir. Alınan tarih: "${payload.date}"`);
   }
-  const createData = await createRes.json();
-  return { eventId: createData.id, htmlLink: createData.htmlLink };
+
+  const targetCalId = encodeURIComponent(calendarId || 'primary');
+  const parts = payload.date.split('-').map(Number);
+  const y = parts[0];
+  const m = parts[1];
+  const d = parts[2];
+  const startDateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + 1);
+  const endDateStr = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+
+  const stableId = generateStableCalendarEventId('tax', payload.id, payload.date);
+  const targetEventId = existingEventId || stableId;
+
+  const isCompleted = Boolean(payload.isCompleted);
+  const authLabel = payload.taxAuthority ? ` (${payload.taxAuthority})` : '';
+
+  const summary = isCompleted
+    ? `✅ [VERGİ BEYANI TAMAMLANDI${authLabel}] ${payload.title}`
+    : `🏛️ [VERGİ SON TARİHİ${authLabel}] ${payload.title}`;
+
+  const description = isCompleted
+    ? `✅ BU VERGİ BEYANI / ÖDEMESİ BAŞARIYLA TAMAMLANDI!\n\n` +
+      `🏛️ Başlık: ${payload.title}\n` +
+      `🌐 Ülke / Otorite: ${payload.countryCode} ${payload.taxAuthority || ''}\n` +
+      `📅 Beyan Tarihi: ${payload.date}\n` +
+      (payload.description ? `📝 Detay: ${payload.description}\n` : '') +
+      `\nBu etkinlik Budfol Vergi & İade Merkezi tarafından tamamlandı olarak işaretlenmiştir.`
+    : `📌 RESMİ VERGİ BEYAN & ÖDEME HATIRLATMASI (Budfol)\n\n` +
+      `🏛️ Başlık: ${payload.title}\n` +
+      `🌐 Ülke / Otorite: ${payload.countryCode} ${payload.taxAuthority || ''}\n` +
+      `📅 Son Tarih / Dönem: ${payload.date}\n` +
+      (payload.description ? `📝 Detay: ${payload.description}\n` : '') +
+      `\nBu etkinlik resmi vergi takvimine göre 1 gün öncesine alarmlı olarak Google Takviminize eklenmiştir.`;
+
+  const eventBody = {
+    id: targetEventId,
+    summary,
+    description,
+    start: { date: startDateStr },
+    end: { date: endDateStr },
+    colorId: isCompleted ? '10' : '9', // 10 = Basil Green, 9 = Blueberry (Blue)
+    reminders: isCompleted
+      ? { useDefault: false, overrides: [] }
+      : {
+          useDefault: false,
+          overrides: [
+            { method: 'popup', minutes: 1440 }, // 1 day before
+            { method: 'popup', minutes: 2880 }  // 2 days before
+          ]
+        },
+    extendedProperties: {
+      private: {
+        budfolApp: 'budfol',
+        budfolType: 'tax',
+        budfolRecordId: payload.id,
+        budfolPeriod: payload.date
+      }
+    },
+    transparency: 'transparent'
+  };
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const putUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${targetEventId}`;
+    let res = await fetch(putUrl, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(eventBody),
+      signal: controller.signal
+    });
+
+    if (res.status === 404) {
+      const postUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events`;
+      res = await fetch(postUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(eventBody),
+        signal: controller.signal
+      });
+
+      if (res.status === 409) {
+        res = await fetch(putUrl, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(eventBody),
+          signal: controller.signal
+        });
+      }
+    }
+
+    if (!res.ok) {
+      if (res.status === 401) {
+        setCachedAccessToken(null);
+        throw new Error('Oturum süresi doldu (401). Lütfen Google Takvim bağlantısını yenileyin.');
+      }
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `Takvim etkinliği oluşturulamadı (${res.status})`);
+    }
+
+    const data = await res.json();
+    return { eventId: data.id || targetEventId, htmlLink: data.htmlLink };
+  } finally {
+    clearTimeout(timeoutId);
+  }
 };
 
 export interface MarkRegularPaymentPaidPayload {

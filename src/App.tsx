@@ -456,6 +456,7 @@ export default function App() {
         token,
         targetCalId,
         {
+          id: inst.id,
           name: inst.name,
           store: inst.store,
           totalAmount: inst.totalAmount,
@@ -469,7 +470,7 @@ export default function App() {
           bankOrCard: inst.bankOrCard,
           note: inst.note,
           isAutoPayment: inst.isAutoPayment,
-          isPaid: Boolean(inst.isAutoPayment || inst.lastPaidMonth === format(new Date(), 'yyyy-MM') || (inst.paidInstallments || 0) >= inst.totalInstallments)
+          isPaid: Boolean(inst.lastPaidMonth === format(new Date(), 'yyyy-MM') || (inst.paidInstallments || 0) >= inst.totalInstallments)
         },
         inst.calendarEventIds || inst.calendarEventId
       );
@@ -1023,7 +1024,7 @@ export default function App() {
       const todayStr = new Date().toISOString().split('T')[0];
       const curMonth = format(new Date(), 'yyyy-MM');
       const isPaid = Boolean(
-        payment.isAutoPayment ||
+        payment.isPaid ||
         payment.lastPaidMonth === curMonth ||
         (payment.paidMonths && payment.paidMonths.includes(curMonth))
       );
@@ -2470,12 +2471,13 @@ export default function App() {
         sub.lastPaidMonth === currentMonthStr ||
         sub.isPaid
       );
-      const isSubGreen = Boolean(sub.isAutoPayment || isPaidThisMonth);
+      const isSubPaid = Boolean(isPaidThisMonth);
 
       const result = await syncEventToGoogleCalendar(
         token,
         calId,
         {
+          id: sub.id,
           name: sub.name,
           amount: sub.amount,
           currency: profile?.currency || 'CAD',
@@ -2485,7 +2487,7 @@ export default function App() {
           status: sub.status,
           note: sub.note,
           isAutoPayment: sub.isAutoPayment,
-          isPaid: isSubGreen
+          isPaid: isSubPaid
         },
         sub.calendarEventId
       );

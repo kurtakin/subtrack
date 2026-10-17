@@ -222,13 +222,13 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
       sub.isPaid
     );
     const isSubAuto = Boolean(sub.isAutoPayment);
-    const isSubGreen = Boolean(isSubAuto || isSubPaidThisMonth);
 
     try {
       const result = await syncEventToGoogleCalendar(
         token,
         selectedCalId || 'primary',
         {
+          id: sub.id,
           name: sub.name,
           amount: sub.amount,
           currency: profile?.currency || 'USD',
@@ -238,7 +238,7 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
           status: sub.status,
           note: sub.note,
           isAutoPayment: isSubAuto,
-          isPaid: isSubGreen
+          isPaid: isSubPaidThisMonth
         },
         sub.calendarEventId
       );
@@ -335,12 +335,12 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
               sub.isPaid
             );
             const isSubAuto = Boolean(sub.isAutoPayment);
-            const isSubGreen = Boolean(isSubAuto || isSubPaidThisMonth);
 
             const result = await syncEventToGoogleCalendar(
               token!,
               selectedCalId || 'primary',
               {
+                id: sub.id,
                 name: sub.name,
                 amount: sub.amount,
                 currency: profile?.currency || 'USD',
@@ -350,7 +350,7 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
                 status: sub.status,
                 note: sub.note,
                 isAutoPayment: isSubAuto,
-                isPaid: isSubGreen
+                isPaid: isSubPaidThisMonth
               },
               sub.calendarEventId
             );
@@ -433,6 +433,7 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
         token,
         selectedCalId || 'primary',
         {
+          id: inst.id,
           name: inst.name,
           store: inst.store,
           totalAmount: inst.totalAmount,
@@ -446,7 +447,7 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
           bankOrCard: inst.bankOrCard,
           note: inst.note,
           isAutoPayment: inst.isAutoPayment,
-          isPaid: Boolean(inst.isAutoPayment)
+          isPaid: Boolean((inst.paidInstallments || 0) >= inst.totalInstallments)
         },
         inst.calendarEventIds || inst.calendarEventId
       );
@@ -540,6 +541,7 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
               token!,
               selectedCalId || 'primary',
               {
+                id: inst.id,
                 name: inst.name,
                 store: inst.store,
                 totalAmount: inst.totalAmount,
@@ -553,7 +555,7 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
                 bankOrCard: inst.bankOrCard,
                 note: inst.note,
                 isAutoPayment: inst.isAutoPayment,
-                isPaid: Boolean(inst.isAutoPayment)
+                isPaid: Boolean((inst.paidInstallments || 0) >= inst.totalInstallments)
               },
               inst.calendarEventIds || inst.calendarEventId
             );
@@ -638,7 +640,7 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
         (regPay.paidMonths && regPay.paidMonths.includes(currentMonthStr)) ||
         regPay.lastPaidMonth === currentMonthStr
       );
-      const isPaid = isPaidThisMonth || Boolean(regPay.isAutoPayment);
+      const isPaid = isPaidThisMonth;
 
       const result = await syncRegularPaymentToGoogleCalendar(
         token!,
@@ -739,7 +741,7 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
               (reg.paidMonths && reg.paidMonths.includes(currentMonthStr)) ||
               reg.lastPaidMonth === currentMonthStr
             );
-            const isPaid = isPaidThisMonth || Boolean(reg.isAutoPayment);
+            const isPaid = isPaidThisMonth;
 
             const result = await syncRegularPaymentToGoogleCalendar(
               token!,
@@ -822,9 +824,14 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
       const calId = selectedCalId || 'primary';
       let greenCount = 0;
 
-      // 1. Regular payments on auto-pay or paid
+      // 1. Regular payments that are actually paid
       for (const reg of regularPayments) {
-        if (reg.status === 'active' && (reg.isAutoPayment || reg.lastPaidMonth)) {
+        const isRegPaid = reg.status === 'active' && Boolean(
+          reg.isPaid ||
+          reg.lastPaidMonth === currentMonthStr ||
+          (reg.paidMonths && reg.paidMonths.includes(currentMonthStr))
+        );
+        if (isRegPaid) {
           try {
             const res = await syncRegularPaymentToGoogleCalendar(
               token!,
@@ -837,7 +844,7 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
                 amount: reg.amount,
                 currency: profile?.currency || 'USD',
                 nextPaymentDate: reg.nextPaymentDate,
-                isAutoPayment: true,
+                isAutoPayment: reg.isAutoPayment,
                 bankOrCard: reg.bankOrCard,
                 accountOrSubscriberNo: reg.accountOrSubscriberNo,
                 note: reg.note,
@@ -860,14 +867,19 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
         }
       }
 
-      // 2. Installments on auto-pay
+      // 2. Installments that have completed or paid
       for (const inst of installments) {
-        if (inst.status === 'active' && inst.isAutoPayment) {
+        const isInstPaid = inst.status === 'active' && Boolean(
+          (inst.paidInstallments || 0) >= inst.totalInstallments ||
+          inst.lastPaidMonth === currentMonthStr
+        );
+        if (isInstPaid) {
           try {
             const res = await syncInstallmentToGoogleCalendar(
               token!,
               calId,
               {
+                id: inst.id,
                 name: inst.name,
                 store: inst.store,
                 totalAmount: inst.totalAmount,
@@ -880,7 +892,7 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
                 nextPaymentDate: inst.nextPaymentDate,
                 bankOrCard: inst.bankOrCard,
                 note: inst.note,
-                isAutoPayment: true,
+                isAutoPayment: inst.isAutoPayment,
                 isPaid: true
               },
               inst.calendarEventIds || inst.calendarEventId
@@ -902,15 +914,14 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
         }
       }
 
-      // 3. Subscriptions on auto-pay or marked paid
+      // 3. Subscriptions that are actually paid
       for (const sub of subscriptions) {
         const isSubPaidThisMonth = Boolean(
           (payments && payments.some(p => p.subscriptionId === sub.id && p.date?.startsWith(currentMonthStr) && p.status === 'paid')) ||
           sub.lastPaidMonth === currentMonthStr ||
           sub.isPaid
         );
-        const isAuto = Boolean(sub.isAutoPayment);
-        const shouldBeGreen = sub.status === 'active' && (isAuto || isSubPaidThisMonth);
+        const shouldBeGreen = sub.status === 'active' && isSubPaidThisMonth;
 
         if (shouldBeGreen) {
           try {
@@ -918,6 +929,7 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
               token!,
               calId,
               {
+                id: sub.id,
                 name: sub.name,
                 amount: sub.amount,
                 currency: profile?.currency || 'USD',
@@ -926,7 +938,7 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
                 nextPaymentDate: sub.nextPaymentDate,
                 status: sub.status,
                 note: sub.note,
-                isAutoPayment: isAuto,
+                isAutoPayment: sub.isAutoPayment,
                 isPaid: true
               },
               sub.calendarEventId

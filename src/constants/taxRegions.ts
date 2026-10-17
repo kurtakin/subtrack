@@ -4,6 +4,14 @@
  */
 import { CountryTaxRegion } from '../types';
 
+export interface TaxKeyDate {
+  id: string;
+  title: string;
+  date: string;
+  isoDate?: string; // Standardized ISO YYYY-MM-DD date for strict calendar sync without hallucinating dates
+  description: string;
+}
+
 export interface TaxRegionInfo {
   code: CountryTaxRegion;
   countryName: string;
@@ -13,7 +21,7 @@ export interface TaxRegionInfo {
   taxAuthority: string; // Tax Authority (CRA, IRS, GIB etc.)
   refundPeriod: string; // Tax refund processing period
   refundTips: string[];
-  keyDates: { title: string; date: string; description: string }[];
+  keyDates: TaxKeyDate[];
 }
 
 export const COUNTRY_TAX_REGIONS: Record<CountryTaxRegion, TaxRegionInfo> = {
@@ -32,9 +40,9 @@ export const COUNTRY_TAX_REGIONS: Record<CountryTaxRegion, TaxRegionInfo> = {
       'Home office expenses can be claimed as a deduction for eligible remote workers.'
     ],
     keyDates: [
-      { title: 'RRSP Contribution Deadline', date: 'March 1, 2026', description: 'Deadline to contribute for previous tax year deduction' },
-      { title: 'Individual Filing Deadline', date: 'April 30, 2026', description: 'CRA personal income tax return and balance due' },
-      { title: 'Self-Employed Filing Deadline', date: 'June 15, 2026', description: 'Return filing deadline for self-employed individuals' }
+      { id: 'ca_rrsp_deadline_2026', title: 'RRSP Contribution Deadline', date: 'March 1, 2026', isoDate: '2026-03-01', description: 'Deadline to contribute for previous tax year deduction' },
+      { id: 'ca_individual_filing_2026', title: 'Individual Filing Deadline', date: 'April 30, 2026', isoDate: '2026-04-30', description: 'CRA personal income tax return and balance due' },
+      { id: 'ca_self_employed_filing_2026', title: 'Self-Employed Filing Deadline', date: 'June 15, 2026', isoDate: '2026-06-15', description: 'Return filing deadline for self-employed individuals' }
     ]
   },
   US: {
@@ -52,9 +60,9 @@ export const COUNTRY_TAX_REGIONS: Record<CountryTaxRegion, TaxRegionInfo> = {
       'HSA (Health Savings Account) offers triple tax advantages.'
     ],
     keyDates: [
-      { title: 'IRS Filing Season Opens', date: 'January 27, 2026', description: 'Electronic tax return acceptance begins' },
-      { title: 'Tax Day (Deadline)', date: 'April 15, 2026', description: 'Form 1040 federal return filing deadline' },
-      { title: 'Extension Deadline', date: 'October 15, 2026', description: 'Final date for taxpayers with 6-month extension' }
+      { id: 'us_irs_season_open_2026', title: 'IRS Filing Season Opens', date: 'January 27, 2026', isoDate: '2026-01-27', description: 'Electronic tax return acceptance begins' },
+      { id: 'us_tax_day_2026', title: 'Tax Day (Deadline)', date: 'April 15, 2026', isoDate: '2026-04-15', description: 'Form 1040 federal return filing deadline' },
+      { id: 'us_extension_deadline_2026', title: 'Extension Deadline', date: 'October 15, 2026', isoDate: '2026-10-15', description: 'Final date for taxpayers with 6-month extension' }
     ]
   },
   TR: {
@@ -72,9 +80,9 @@ export const COUNTRY_TAX_REGIONS: Record<CountryTaxRegion, TaxRegionInfo> = {
       'Actual expense method for rental income allows itemized expense deductions.'
     ],
     keyDates: [
-      { title: 'Annual Income Tax Return', date: 'March 1 - 31, 2026', description: 'Return filing and 1st installment payment' },
-      { title: '2nd Installment Payment', date: 'July 31, 2026', description: 'Second income tax installment due' },
-      { title: 'Motor Vehicle Tax (MTV)', date: 'January & July 2026', description: 'Semi-annual vehicle tax periods' }
+      { id: 'tr_annual_return_2026', title: 'Annual Income Tax Return', date: 'March 1 - 31, 2026', isoDate: '2026-03-31', description: 'Return filing and 1st installment payment' },
+      { id: 'tr_installment_2_2026', title: '2nd Installment Payment', date: 'July 31, 2026', isoDate: '2026-07-31', description: 'Second income tax installment due' },
+      { id: 'tr_mtv_installment_1_2026', title: 'Motor Vehicle Tax (MTV)', date: 'January & July 2026', isoDate: '2026-01-31', description: 'Semi-annual vehicle tax periods' }
     ]
   },
   EU: {
@@ -92,9 +100,9 @@ export const COUNTRY_TAX_REGIONS: Record<CountryTaxRegion, TaxRegionInfo> = {
       'Childcare costs and charitable contributions can be deducted from tax base.'
     ],
     keyDates: [
-      { title: 'EU Tax Season Opens', date: 'March 1, 2026', description: 'Pre-filled tax returns available for review' },
-      { title: 'General Filing Deadline', date: 'July 31, 2026', description: 'Standard individual tax return submission deadline' },
-      { title: 'Tax Advisor Extension', date: 'February 28, 2027', description: 'Extended deadline for returns prepared by certified tax advisors' }
+      { id: 'eu_tax_season_open_2026', title: 'EU Tax Season Opens', date: 'March 1, 2026', isoDate: '2026-03-01', description: 'Pre-filled tax returns available for review' },
+      { id: 'eu_general_deadline_2026', title: 'General Filing Deadline', date: 'July 31, 2026', isoDate: '2026-07-31', description: 'Standard individual tax return submission deadline' },
+      { id: 'eu_advisor_extension_2027', title: 'Tax Advisor Extension', date: 'February 28, 2027', isoDate: '2027-02-28', description: 'Extended deadline for returns prepared by certified tax advisors' }
     ]
   },
   UK: {
@@ -111,9 +119,9 @@ export const COUNTRY_TAX_REGIONS: Record<CountryTaxRegion, TaxRegionInfo> = {
       'Business mileage allowance can be claimed if using personal vehicle for work.'
     ],
     keyDates: [
-      { title: 'Tax Year End', date: 'April 5, 2026', description: 'Official end of the UK tax year' },
-      { title: 'Paper Return Deadline', date: 'October 31, 2026', description: 'Postal paper tax return submission deadline' },
-      { title: 'Online Self Assessment Deadline', date: 'January 31, 2027', description: 'Online tax return and balancing payment deadline' }
+      { id: 'uk_tax_year_end_2026', title: 'Tax Year End', date: 'April 5, 2026', isoDate: '2026-04-05', description: 'Official end of the UK tax year' },
+      { id: 'uk_paper_return_2026', title: 'Paper Return Deadline', date: 'October 31, 2026', isoDate: '2026-10-31', description: 'Postal paper tax return submission deadline' },
+      { id: 'uk_online_assessment_2027', title: 'Online Self Assessment Deadline', date: 'January 31, 2027', isoDate: '2027-01-31', description: 'Online tax return and balancing payment deadline' }
     ]
   },
   OTHER: {
@@ -130,8 +138,8 @@ export const COUNTRY_TAX_REGIONS: Record<CountryTaxRegion, TaxRegionInfo> = {
       'Document pension and healthcare contributions to deduct from local taxable base.'
     ],
     keyDates: [
-      { title: 'Fiscal Year End', date: 'December 31', description: 'Annual aggregation of income and business deductions' },
-      { title: 'General Filing Period', date: 'April - June', description: 'Standard annual filing season in most jurisdictions' }
+      { id: 'other_fiscal_year_end_2026', title: 'Fiscal Year End', date: 'December 31', isoDate: '2026-12-31', description: 'Annual aggregation of income and business deductions' },
+      { id: 'other_general_filing_2026', title: 'General Filing Period', date: 'April - June', isoDate: '2026-06-30', description: 'Standard annual filing season in most jurisdictions' }
     ]
   }
 };
@@ -152,9 +160,9 @@ const TURKISH_TAX_REGIONS: Record<CountryTaxRegion, TaxRegionInfo> = {
       'Evden calisma (Home Office) giderleri calisanlar icin indirim konusu yapilabilir.'
     ],
     keyDates: [
-      { title: 'RRSP Katki Son Gunu', date: '1 Mart 2026', description: 'Onceki yil matrahindan dusmek icin son tarih' },
-      { title: 'Bireysel Beyan Son Gunu', date: '30 Nisan 2026', description: 'CRA gelir vergisi beyani ve borc odemesi' },
-      { title: 'Self-Employed Beyan', date: '15 Haziran 2026', description: 'Serbest calisanlar icin beyan teslim tarihi' }
+      { id: 'ca_rrsp_deadline_2026', title: 'RRSP Katki Son Gunu', date: '1 Mart 2026', isoDate: '2026-03-01', description: 'Onceki yil matrahindan dusmek icin son tarih' },
+      { id: 'ca_individual_filing_2026', title: 'Bireysel Beyan Son Gunu', date: '30 Nisan 2026', isoDate: '2026-04-30', description: 'CRA gelir vergisi beyani ve borc odemesi' },
+      { id: 'ca_self_employed_filing_2026', title: 'Self-Employed Beyan', date: '15 Haziran 2026', isoDate: '2026-06-15', description: 'Serbest calisanlar icin beyan teslim tarihi' }
     ]
   },
   US: {
@@ -172,9 +180,9 @@ const TURKISH_TAX_REGIONS: Record<CountryTaxRegion, TaxRegionInfo> = {
       'HSA (Health Savings Account) uclu vergi avantaji sunar.'
     ],
     keyDates: [
-      { title: 'IRS Beyan Acilisi', date: '27 Ocak 2026', description: 'Elektronik vergi beyanlarinin kabulu baslar' },
-      { title: 'Tax Day (Son Gun)', date: '15 Nisan 2026', description: 'Form 1040 federal beyan son teslimi' },
-      { title: 'Uzatma Son Gunu', date: '15 Ekim 2026', description: 'Extension alanlar icin son bildirim gunu' }
+      { id: 'us_irs_season_open_2026', title: 'IRS Beyan Acilisi', date: '27 Ocak 2026', isoDate: '2026-01-27', description: 'Elektronik vergi beyanlarinin kabulu baslar' },
+      { id: 'us_tax_day_2026', title: 'Tax Day (Son Gun)', date: '15 Nisan 2026', isoDate: '2026-04-15', description: 'Form 1040 federal beyan son teslimi' },
+      { id: 'us_extension_deadline_2026', title: 'Uzatma Son Gunu', date: '15 Ekim 2026', isoDate: '2026-10-15', description: 'Extension alanlar icin son bildirim gunu' }
     ]
   },
   TR: {
@@ -192,9 +200,9 @@ const TURKISH_TAX_REGIONS: Record<CountryTaxRegion, TaxRegionInfo> = {
       'Kira geliri beyaninda gercek gider yontemi tercih edilirse faturali giderler gelirden dusulur.'
     ],
     keyDates: [
-      { title: 'Yillik Gelir Vergisi Beyani', date: '1 - 31 Mart 2026', description: 'GIB Hazir Beyan uzerinden beyan ve 1. taksit' },
-      { title: '2. Taksit Odemesi', date: '31 Temmuz 2026', description: 'Gelir vergisi ikinci taksit odemesi' },
-      { title: 'MTV 1. ve 2. Taksit', date: 'Ocak ve Temmuz 2026', description: 'Motorlu Tasitlar Vergisi donemleri' }
+      { id: 'tr_annual_return_2026', title: 'Yillik Gelir Vergisi Beyani', date: '1 - 31 Mart 2026', isoDate: '2026-03-31', description: 'GIB Hazir Beyan uzerinden beyan ve 1. taksit' },
+      { id: 'tr_installment_2_2026', title: '2. Taksit Odemesi', date: '31 Temmuz 2026', isoDate: '2026-07-31', description: 'Gelir vergisi ikinci taksit odemesi' },
+      { id: 'tr_mtv_installment_1_2026', title: 'MTV 1. ve 2. Taksit', date: 'Ocak ve Temmuz 2026', isoDate: '2026-01-31', description: 'Motorlu Tasitlar Vergisi donemleri' }
     ]
   },
   EU: {
@@ -212,9 +220,9 @@ const TURKISH_TAX_REGIONS: Record<CountryTaxRegion, TaxRegionInfo> = {
       'Cocuk bakim masraflari ve bagislar matrahtan indirilebilir.'
     ],
     keyDates: [
-      { title: 'AB Vergi Sezonu Baslangici', date: '1 Mart 2026', description: 'Onceden doldurulmus beyanlarin kontrolu' },
-      { title: 'Genel Beyan Bitisi', date: '31 Temmuz 2026', description: 'Bireysel vergi beyannamesi teslim son tarihi' },
-      { title: 'Vergi Danismanli Uzatma', date: '28 Subat 2027', description: 'Steuerberater / Mali musavirle yapilan beyanlar' }
+      { id: 'eu_tax_season_open_2026', title: 'AB Vergi Sezonu Baslangici', date: '1 Mart 2026', isoDate: '2026-03-01', description: 'Onceden doldurulmus beyanlarin kontrolu' },
+      { id: 'eu_general_deadline_2026', title: 'Genel Beyan Bitisi', date: '31 Temmuz 2026', isoDate: '2026-07-31', description: 'Bireysel vergi beyannamesi teslim son tarihi' },
+      { id: 'eu_advisor_extension_2027', title: 'Vergi Danismanli Uzatma', date: '28 Subat 2027', isoDate: '2027-02-28', description: 'Steuerberater / Mali musavirle yapilan beyanlar' }
     ]
   },
   UK: {
@@ -231,9 +239,9 @@ const TURKISH_TAX_REGIONS: Record<CountryTaxRegion, TaxRegionInfo> = {
       'Is amacli arac kullanimi milaj indirimi (Mileage Allowance) saglar.'
     ],
     keyDates: [
-      { title: 'Mali Yil Bitisi', date: '5 Nisan 2026', description: 'UK mali yilinin resmi kapanisi' },
-      { title: 'Kagit Beyan', date: '31 Ekim 2026', description: 'Posta ile beyan gonderim son gunu' },
-      { title: 'Online Self Assessment', date: '31 Ocak 2027', description: 'Online beyan ve vergi odemesi son tarihi' }
+      { id: 'uk_tax_year_end_2026', title: 'Mali Yil Bitisi', date: '5 Nisan 2026', isoDate: '2026-04-05', description: 'UK mali yilinin resmi kapanisi' },
+      { id: 'uk_paper_return_2026', title: 'Kagit Beyan', date: '31 Ekim 2026', isoDate: '2026-10-31', description: 'Posta ile beyan gonderim son gunu' },
+      { id: 'uk_online_assessment_2027', title: 'Online Self Assessment', date: '31 Ocak 2027', isoDate: '2027-01-31', description: 'Online beyan ve vergi odemesi son tarihi' }
     ]
   },
   OTHER: {
@@ -250,8 +258,8 @@ const TURKISH_TAX_REGIONS: Record<CountryTaxRegion, TaxRegionInfo> = {
       'Emeklilik ve saglik prim odemelerini vergi matrahindan dusmek icin belgeleyin.'
     ],
     keyDates: [
-      { title: 'Yil Sonu Mali Kapanis', date: '31 Aralik', description: 'Yillik gelir ve harcamalarin toplanmasi' },
-      { title: 'Genel Beyan Donemi', date: 'Nisan - Haziran', description: 'Standart yillik beyan donemi' }
+      { id: 'other_fiscal_year_end_2026', title: 'Yil Sonu Mali Kapanis', date: '31 Aralik', isoDate: '2026-12-31', description: 'Yillik gelir ve harcamalarin toplanmasi' },
+      { id: 'other_general_filing_2026', title: 'Genel Beyan Donemi', date: 'Nisan - Haziran', isoDate: '2026-06-30', description: 'Standart yillik beyan donemi' }
     ]
   }
 };

@@ -30,6 +30,11 @@ import { getTaxRegion, getAllTaxRegions, normalizeCountryCode } from '../constan
 import { useTranslation } from '../context/LanguageContext';
 import { cn } from '../lib/utils';
 import { AddEditTaxYearModal } from './AddEditTaxYearModal';
+import { 
+  syncTaxMilestoneToGoogleCalendar, 
+  getCachedAccessToken, 
+  connectGoogleCalendar 
+} from '../services/googleCalendar';
 
 interface TaxCenterViewProps {
   taxProfile: TaxProfile;
@@ -63,6 +68,10 @@ export const TaxCenterView: React.FC<TaxCenterViewProps> = ({
 
   // Status Filter for Year Records
   const [statusFilter, setStatusFilter] = useState<'all' | 'filed' | 'refund_received' | 'pending'>('all');
+
+  // Calendar sync state for tax milestones
+  const [syncingMilestoneId, setSyncingMilestoneId] = useState<string | null>(null);
+  const [milestoneSyncFeedback, setMilestoneSyncFeedback] = useState<Record<string, string>>({});
 
   // Local state for Quick Tax Profile Form
   const [selectedCountry, setSelectedCountry] = useState<CountryTaxRegion>(() => normalizeCountryCode(taxProfile.country));
@@ -125,6 +134,96 @@ export const TaxCenterView: React.FC<TaxCenterViewProps> = ({
 
     setProfileSavedFeedback(true);
     setTimeout(() => setProfileSavedFeedback(false), 2500);
+  };
+
+  const handleSyncMilestone = async (kd: { id: string; title: string; isoDate?: string; description: string }) => {
+    if (!kd.isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(kd.isoDate)) {
+      alert(language === 'tr' ? 'Bu dönemin kesinleşmiş bir resmi takvim tarihi (YYYY-MM-DD) bulunmuyor.' : 'This milestone does not have a confirmed statutory date (YYYY-MM-DD).');
+      return;
+    }
+    let token = getCachedAccessToken();
+    if (!token) {
+      try {
+        token = await connectGoogleCalendar();
+      } catch {
+        alert(language === 'tr' ? 'Google Takvim bağlantısı kurulamadı.' : 'Could not connect to Google Calendar.');
+        return;
+      }
+    }
+    setSyncingMilestoneId(kd.id);
+    try {
+      await syncTaxMilestoneToGoogleCalendar(
+        token,
+        'primary',
+        {
+          id: kd.id,
+          title: kd.title,
+          countryCode: currentRegion.code,
+          taxAuthority: currentRegion.taxAuthority,
+          date: kd.isoDate,
+          type: 'statutory_milestone',
+          description: kd.description,
+          isCompleted: false
+        }
+      );
+      setMilestoneSyncFeedback(prev => ({ ...prev, [kd.id]: 'synced' }));
+      setTimeout(() => {
+        setMilestoneSyncFeedback(prev => {
+          const next = { ...prev };
+          delete next[kd.id];
+          return next;
+        });
+      }, 3500);
+    } catch (err: any) {
+      alert(`Takvim aktarımı başarısız: ${err.message || ''}`);
+    } finally {
+      setSyncingMilestoneId(null);
+    }
+  };
+
+  const handleSyncFilingRecord = async (r: TaxYearRecord) => {
+    if (!r.filingDate || !/^\d{4}-\d{2}-\d{2}$/.test(r.filingDate)) {
+      alert(language === 'tr' ? 'Bu vergi kaydında geçerli bir beyan tarihi (YYYY-MM-DD) bulunamadı.' : 'No valid filing date (YYYY-MM-DD) found on this record.');
+      return;
+    }
+    let token = getCachedAccessToken();
+    if (!token) {
+      try {
+        token = await connectGoogleCalendar();
+      } catch {
+        alert(language === 'tr' ? 'Google Takvim bağlantısı kurulamadı.' : 'Could not connect to Google Calendar.');
+        return;
+      }
+    }
+    setSyncingMilestoneId(r.id);
+    try {
+      await syncTaxMilestoneToGoogleCalendar(
+        token,
+        'primary',
+        {
+          id: r.id,
+          title: `${r.year} Tax Return Filing`,
+          countryCode: currentRegion.code,
+          taxAuthority: currentRegion.taxAuthority,
+          date: r.filingDate,
+          type: 'declaration_filing',
+          description: r.note || `${r.year} tax return filing`,
+          isCompleted: r.status === 'filed' || r.status === 'refund_received'
+        }
+      );
+      setMilestoneSyncFeedback(prev => ({ ...prev, [r.id]: 'synced' }));
+      setTimeout(() => {
+        setMilestoneSyncFeedback(prev => {
+          const next = { ...prev };
+          delete next[r.id];
+          return next;
+        });
+      }, 3500);
+    } catch (err: any) {
+      alert(`Takvim aktarımı başarısız: ${err.message || ''}`);
+    } finally {
+      setSyncingMilestoneId(null);
+    }
   };
 
   // Simulator Calculations
@@ -468,6 +567,28 @@ export const TaxCenterView: React.FC<TaxCenterViewProps> = ({
                         </td>
                         <td className="py-4 px-6 text-right">
                           <div className="flex items-center justify-end gap-1">
+                            {r.filingDate && (
+                              <button
+                                type="button"
+                                onClick={() => handleSyncFilingRecord(r)}
+                                disabled={syncingMilestoneId === r.id}
+                                className={cn(
+                                  "p-1.5 rounded-lg transition-colors cursor-pointer",
+                                  milestoneSyncFeedback[r.id] === 'synced'
+                                    ? "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40"
+                                    : "text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                                )}
+                                title={milestoneSyncFeedback[r.id] === 'synced' ? "Synced to Calendar" : "Sync Filing Date to Google Calendar"}
+                              >
+                                {syncingMilestoneId === r.id ? (
+                                  <Clock className="w-3.5 h-3.5 animate-spin text-blue-500" />
+                                ) : milestoneSyncFeedback[r.id] === 'synced' ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                ) : (
+                                  <Calendar className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => {
@@ -752,28 +873,65 @@ export const TaxCenterView: React.FC<TaxCenterViewProps> = ({
 
             {/* Key Dates Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {currentRegion.keyDates.map((kd, idx) => (
-                <div 
-                  key={idx}
-                  className="p-5 rounded-2xl bg-gray-50 dark:bg-gray-800/40 border border-gray-200/60 dark:border-gray-700/60 space-y-2"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300">
-                      Milestone {idx + 1}
-                    </span>
-                    <Calendar className="w-4 h-4 text-indigo-500" />
+              {currentRegion.keyDates.map((kd, idx) => {
+                const isSyncing = syncingMilestoneId === kd.id;
+                const isSynced = milestoneSyncFeedback[kd.id] === 'synced';
+                return (
+                  <div 
+                    key={idx}
+                    className="p-5 rounded-2xl bg-gray-50 dark:bg-gray-800/40 border border-gray-200/60 dark:border-gray-700/60 flex flex-col justify-between space-y-3"
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300">
+                          Milestone {idx + 1}
+                        </span>
+                        <Calendar className="w-4 h-4 text-indigo-500" />
+                      </div>
+                      <h3 className="text-sm font-black text-gray-900 dark:text-white">
+                        {kd.title}
+                      </h3>
+                      <div className="text-xs font-black text-indigo-600 dark:text-indigo-400">
+                        {kd.date}
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+                        {kd.description}
+                      </p>
+                    </div>
+
+                    {kd.isoDate && (
+                      <button
+                        type="button"
+                        onClick={() => handleSyncMilestone(kd)}
+                        disabled={isSyncing}
+                        className={cn(
+                          "w-full mt-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 border shadow-2xs",
+                          isSynced
+                            ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                            : "bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700/60 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700"
+                        )}
+                      >
+                        {isSynced ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>{language === 'tr' ? 'Takvimde Güncel' : 'Synced to Calendar'}</span>
+                          </>
+                        ) : isSyncing ? (
+                          <>
+                            <Clock className="w-3.5 h-3.5 animate-spin text-indigo-500" />
+                            <span>{language === 'tr' ? 'Eşitleniyor...' : 'Syncing...'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Calendar className="w-3.5 h-3.5 text-indigo-500" />
+                            <span>{language === 'tr' ? 'Takvime Aktar / Güncelle' : 'Sync to Calendar'}</span>
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
-                  <h3 className="text-sm font-black text-gray-900 dark:text-white">
-                    {kd.title}
-                  </h3>
-                  <div className="text-xs font-black text-indigo-600 dark:text-indigo-400">
-                    {kd.date}
-                  </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {kd.description}
-                  </p>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Official Tax Saving Tips */}

@@ -204,13 +204,16 @@ export const AddEditModal = ({
               token,
               calendarId,
               {
+                id: subId,
                 name: data.name,
                 amount: data.amount,
                 currency: profile?.currency || 'CAD',
                 category: data.category,
                 billingCycle: data.billingCycle,
                 nextPaymentDate: data.nextPaymentDate,
-                status: data.status
+                status: data.status,
+                isAutoPayment: data.isAutoPayment,
+                note: data.note
               },
               existingEventId
             );
