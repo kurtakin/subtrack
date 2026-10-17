@@ -1031,105 +1031,167 @@ export const syncRegularPaymentToGoogleCalendar = async (
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-  // Verify existingEventId: only use existingEventId if it is verified to belong to the SAME app, record, calendar, and target period!
-  let verifiedEventId: string | undefined;
-  if (existingEventId) {
-    if (existingEventId === stableEventId) {
-      verifiedEventId = stableEventId;
-    } else {
-      try {
+  try {
+    // Verify existingEventId: only use existingEventId if it is verified to belong to the SAME app, record, calendar, and target period!
+    let verifiedEventId: string | undefined;
+    if (existingEventId) {
+      if (existingEventId === stableEventId) {
+        verifiedEventId = stableEventId;
+      } else {
         const checkUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${encodeURIComponent(existingEventId)}`;
-        const checkRes = await fetch(checkUrl, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          signal: controller.signal
-        });
-        if (checkRes.ok) {
-          const checkData = await checkRes.json();
-          const p = checkData.extendedProperties?.private;
-          if (p?.budfolApp === 'budfol' && p?.budfolRecordId === payment.id && p?.budfolPeriod === targetPeriod) {
+        let checkRes: Response;
+        try {
+          checkRes = await fetch(checkUrl, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            signal: controller.signal
+          });
+        } catch (fetchErr: unknown) {
+          if (controller.signal.aborted) {
+            throw new Error(`Google Takvim doğrulama isteği zaman aşımına uğradı (timeout). Mevcut etkinlik (${existingEventId}) durumu doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+          }
+          const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+          throw new Error(`Google Takvim ağına erişilemedi (ağ hatası: ${msg}). Mevcut etkinlik (${existingEventId}) durumu doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+        }
+
+        if (checkRes.status === 404) {
+          // Kesin 404: Etkinlik takvimde bulunamadı (silinmiş veya mevcut değil).
+          // Sahiplik/dönem çelişkisi riski yoktur; bu dönem için deterministik kimlik ile devam edilebilir.
+          verifiedEventId = undefined;
+        } else if (!checkRes.ok) {
+          // 401, 403, 429, 5xx ve diğer belirsiz HTTP hataları: sahiplik/dönem bilinemez, yazma isteği göndermeden dur.
+          if (checkRes.status === 401) {
+            setCachedAccessToken(null);
+            throw new Error(`Google Takvim oturum süresi doldu (401). Mevcut etkinlik (${existingEventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu. Lütfen Google Takvim bağlantısını yenileyin.`);
+          }
+          if (checkRes.status === 403) {
+            throw new Error(`Google Takvim erişim yetkisi veya kota hatası (403). Mevcut etkinlik (${existingEventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+          }
+          if (checkRes.status === 429) {
+            throw new Error(`Google Takvim istek limiti aşıldı (429). Mevcut etkinlik (${existingEventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+          }
+          if (checkRes.status >= 500) {
+            throw new Error(`Google Takvim sunucu hatası (${checkRes.status}). Mevcut etkinlik (${existingEventId}) durumu doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+          }
+          throw new Error(`Google Takvim doğrulama hatası (${checkRes.status}). Mevcut etkinlik (${existingEventId}) durumu doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+        } else {
+          // 200 OK: Gövdeyi çözümle ve sahiplik/dönem kontrolü yap
+          let checkData: {
+            id?: string;
+            extendedProperties?: {
+              private?: {
+                budfolApp?: string;
+                budfolRecordId?: string;
+                budfolPeriod?: string;
+              };
+            };
+          };
+          try {
+            const rawParsed: unknown = await checkRes.json();
+            if (!rawParsed || typeof rawParsed !== 'object') {
+              throw new Error('Geçersiz yanıt nesnesi');
+            }
+            checkData = rawParsed as {
+              id?: string;
+              extendedProperties?: {
+                private?: {
+                  budfolApp?: string;
+                  budfolRecordId?: string;
+                  budfolPeriod?: string;
+                };
+              };
+            };
+          } catch (jsonErr: unknown) {
+            const msg = jsonErr instanceof Error ? jsonErr.message : String(jsonErr);
+            throw new Error(`Google Takvim yanıtı çözümlenemedi (bozuk yanıt: ${msg}). Mevcut etkinlik (${existingEventId}) durumu doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+          }
+
+          const priv = checkData.extendedProperties?.private;
+          if (priv?.budfolApp === 'budfol' && priv?.budfolRecordId === payment.id && priv?.budfolPeriod === targetPeriod) {
+            // Aynı kayıt ve hedef dönem doğrulandı: mevcut etkinliği kullan
             verifiedEventId = existingEventId;
+          } else {
+            // Başarılı ve geçerli yanıtta farklı kayıt/dönem tespiti:
+            // Sahiplik ve dönem biliniyor ancak bu kayıt ve hedef döneme ait değil.
+            // Bu eski etkinliğin üzerine yazılmaz, bu hedef dönem için deterministik kimlik kullanılır.
+            verifiedEventId = undefined;
           }
         }
-      } catch {
-        // Verification failed; do not overwrite or adopt
       }
     }
-  }
 
-  const targetEventId = verifiedEventId || stableEventId;
+    const targetEventId = verifiedEventId || stableEventId;
 
-  const categoryLabels: Record<string, string> = {
-    rent: '🏠 Kira',
-    electricity: '⚡ Elektrik',
-    gas: '🔥 Doğalgaz',
-    water: '💧 Su',
-    phone_internet: '📱 Telefon & İnternet',
-    dues: '🏢 Aidat',
-    person: '👤 Kişiye Ödeme',
-    institution: '🏛️ Kurum Ödemesi',
-    insurance: '🛡️ Sigorta',
-    other: '💳 Düzenli Ödeme'
-  };
-  const catLabel = categoryLabels[payment.category] || '💳 Aylık Ödeme';
+    const categoryLabels: Record<string, string> = {
+      rent: '🏠 Kira',
+      electricity: '⚡ Elektrik',
+      gas: '🔥 Doğalgaz',
+      water: '💧 Su',
+      phone_internet: '📱 Telefon & İnternet',
+      dues: '🏢 Aidat',
+      person: '👤 Kişiye Ödeme',
+      institution: '🏛️ Kurum Ödemesi',
+      insurance: '🛡️ Sigorta',
+      other: '💳 Düzenli Ödeme'
+    };
+    const catLabel = categoryLabels[payment.category] || '💳 Aylık Ödeme';
 
-  const summary = isActuallyPaid
-    ? `✅ [ÖDENDİ] ${payment.name} - ${payment.amount.toFixed(2)} ${curr}${payment.payee ? ` (${payment.payee})` : ''}`
-    : `🔔 [${catLabel}] ${payment.name} - ${payment.amount.toFixed(2)} ${curr}${payment.payee ? ` (${payment.payee})` : ''}`;
+    const summary = isActuallyPaid
+      ? `✅ [ÖDENDİ] ${payment.name} - ${payment.amount.toFixed(2)} ${curr}${payment.payee ? ` (${payment.payee})` : ''}`
+      : `🔔 [${catLabel}] ${payment.name} - ${payment.amount.toFixed(2)} ${curr}${payment.payee ? ` (${payment.payee})` : ''}`;
 
-  const description = isActuallyPaid
-    ? `✅ BU DÜZENLİ ÖDEME BUDFOL TARAFINDAN ÖDENDİ OLARAK KAYDEDİLDİ!\n\n` +
-      `🏷️ Ödeme: ${payment.name}\n` +
-      (payment.payee ? `🏢 Alıcı: ${payment.payee}\n` : '') +
-      `💵 Tutar: ${payment.amount.toFixed(2)} ${curr}\n` +
-      `📅 Vade / Ödeme Tarihi: ${dateStr}\n` +
-      `🔄 Ödeme Durumu: Ödendi (Yeşil)\n` +
-      `🎯 Hedef Dönem: ${targetPeriod}\n` +
-      (payment.isAutoPayment ? `⚙️ Ödeme Tercihi: Otomatik Ödeme Talimatlı\n` : `⚙️ Ödeme Tercihi: Manuel Ödeme\n`) +
-      (payment.accountOrSubscriberNo ? `🔢 Abone/Tesisat/IBAN: ${payment.accountOrSubscriberNo}\n` : '') +
-      (payment.bankOrCard ? `🏦 Ödeme Hesabı/Kartı: ${payment.bankOrCard}\n` : '') +
-      (payment.note ? `📝 Not: ${payment.note}\n` : '') +
-      `\nBu etkinlik Budfol tarafından Google Takvim'de güncellenmiştir.`
-    : `📌 AYLIK DÜZENLİ ÖDEME HATIRLATMASI (Budfol)\n\n` +
-      `🏷️ Ödeme: ${payment.name}\n` +
-      (payment.payee ? `🏢 Alıcı: ${payment.payee}\n` : '') +
-      `💵 Tutar: ${payment.amount.toFixed(2)} ${curr}\n` +
-      `📅 Vade Tarihi: ${dateStr}\n` +
-      `⏳ Ödeme Durumu: Bekliyor / Planlandı\n` +
-      `🎯 Hedef Dönem: ${targetPeriod}\n` +
-      (payment.isAutoPayment ? `⚙️ Ödeme Tercihi: Otomatik Ödeme Talimatlı\n` : `⚙️ Ödeme Tercihi: Manuel Ödeme\n`) +
-      (payment.accountOrSubscriberNo ? `🔢 Abone/Tesisat/IBAN: ${payment.accountOrSubscriberNo}\n` : '') +
-      (payment.bankOrCard ? `🏦 Ödeme Hesabı/Kartı: ${payment.bankOrCard}\n` : '') +
-      (payment.note ? `📝 Not: ${payment.note}\n` : '') +
-      `\nBu etkinlik Budfol tarafından 1 gün öncesine alarmlı olarak takviminize eklenmiştir.`;
+    const description = isActuallyPaid
+      ? `✅ BU DÜZENLİ ÖDEME BUDFOL TARAFINDAN ÖDENDİ OLARAK KAYDEDİLDİ!\n\n` +
+        `🏷️ Ödeme: ${payment.name}\n` +
+        (payment.payee ? `🏢 Alıcı: ${payment.payee}\n` : '') +
+        `💵 Tutar: ${payment.amount.toFixed(2)} ${curr}\n` +
+        `📅 Vade / Ödeme Tarihi: ${dateStr}\n` +
+        `🔄 Ödeme Durumu: Ödendi (Yeşil)\n` +
+        `🎯 Hedef Dönem: ${targetPeriod}\n` +
+        (payment.isAutoPayment ? `⚙️ Ödeme Tercihi: Otomatik Ödeme Talimatlı\n` : `⚙️ Ödeme Tercihi: Manuel Ödeme\n`) +
+        (payment.accountOrSubscriberNo ? `🔢 Abone/Tesisat/IBAN: ${payment.accountOrSubscriberNo}\n` : '') +
+        (payment.bankOrCard ? `🏦 Ödeme Hesabı/Kartı: ${payment.bankOrCard}\n` : '') +
+        (payment.note ? `📝 Not: ${payment.note}\n` : '') +
+        `\nBu etkinlik Budfol tarafından Google Takvim'de güncellenmiştir.`
+      : `📌 AYLIK DÜZENLİ ÖDEME HATIRLATMASI (Budfol)\n\n` +
+        `🏷️ Ödeme: ${payment.name}\n` +
+        (payment.payee ? `🏢 Alıcı: ${payment.payee}\n` : '') +
+        `💵 Tutar: ${payment.amount.toFixed(2)} ${curr}\n` +
+        `📅 Vade Tarihi: ${dateStr}\n` +
+        `⏳ Ödeme Durumu: Bekliyor / Planlandı\n` +
+        `🎯 Hedef Dönem: ${targetPeriod}\n` +
+        (payment.isAutoPayment ? `⚙️ Ödeme Tercihi: Otomatik Ödeme Talimatlı\n` : `⚙️ Ödeme Tercihi: Manuel Ödeme\n`) +
+        (payment.accountOrSubscriberNo ? `🔢 Abone/Tesisat/IBAN: ${payment.accountOrSubscriberNo}\n` : '') +
+        (payment.bankOrCard ? `🏦 Ödeme Hesabı/Kartı: ${payment.bankOrCard}\n` : '') +
+        (payment.note ? `📝 Not: ${payment.note}\n` : '') +
+        `\nBu etkinlik Budfol tarafından 1 gün öncesine alarmlı olarak takviminize eklenmiştir.`;
 
-  const eventBody = {
-    id: targetEventId,
-    summary,
-    description,
-    start: { date: dateStr },
-    end: { date: endDateStr },
-    colorId: isActuallyPaid ? '10' : '6', // 10 = Basil (Forest Green), 6 = Tangerine (Orange)
-    reminders: isActuallyPaid
-      ? { useDefault: false, overrides: [] }
-      : {
-          useDefault: false,
-          overrides: [
-            { method: 'popup', minutes: 1440 }, // 1 day before
-            { method: 'popup', minutes: 120 }   // 2 hours before
-          ]
-        },
-    extendedProperties: {
-      private: {
-        budfolApp: 'budfol',
-        budfolType: 'regular_payment',
-        budfolRecordId: payment.id,
-        budfolPeriod: targetPeriod
-      }
-    },
-    transparency: 'transparent'
-  };
+    const eventBody = {
+      id: targetEventId,
+      summary,
+      description,
+      start: { date: dateStr },
+      end: { date: endDateStr },
+      colorId: isActuallyPaid ? '10' : '6', // 10 = Basil (Forest Green), 6 = Tangerine (Orange)
+      reminders: isActuallyPaid
+        ? { useDefault: false, overrides: [] }
+        : {
+            useDefault: false,
+            overrides: [
+              { method: 'popup', minutes: 1440 }, // 1 day before
+              { method: 'popup', minutes: 120 }   // 2 hours before
+            ]
+          },
+      extendedProperties: {
+        private: {
+          budfolApp: 'budfol',
+          budfolType: 'regular_payment',
+          budfolRecordId: payment.id,
+          budfolPeriod: targetPeriod
+        }
+      },
+      transparency: 'transparent'
+    };
 
-  try {
     const putUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${targetEventId}`;
     let res = await fetch(putUrl, {
       method: 'PUT',
