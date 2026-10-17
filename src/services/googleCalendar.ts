@@ -1485,147 +1485,233 @@ export const syncTaxMilestoneToGoogleCalendar = async (
 };
 
 export interface MarkRegularPaymentPaidPayload {
-  eventId?: string;
+  id: string; // real regular payment record ID
   name: string;
   amount: number;
+  paidPeriod?: string; // explicit paid period e.g. "2026-10"
+  dueDate?: string; // due date of the paid period e.g. "2026-10-15"
   currency?: string;
   payee?: string;
   category?: string;
-  dueDate?: string;
+  eventId?: string; // existing event ID if known
   isAutoPayment?: boolean;
+  isPaid?: boolean;
+  lastPaidMonth?: string;
+  paidMonths?: string[];
+  paymentHistory?: Array<{ month: string }>;
+  note?: string;
+  accountOrSubscriberNo?: string;
+  bankOrCard?: string;
 }
 
 /**
  * Marks regular payment event in Google Calendar as paid with GREEN color (colorId: 10 - Basil).
- * If the eventId is not provided or not found, it automatically searches the user's calendar
- * or creates the green paid event on the payment due date.
+ * Strictly uses the real record ID and explicit paid period (distinct from next payment date).
+ * Uses the exact same deterministic event ID formula as regular synchronization.
+ * Verifies existing event ownership using runtime type guards and validation helpers.
+ * Does NOT adopt events based on name, summary, or date similarity, and never creates ID-less events.
+ * Only updates to green when actual proof of payment exists for the paid period (auto-pay preference is not proof).
+ * Stops on validation errors without writing; only creates event with deterministic ID upon definitive 404.
  */
 export const markRegularPaymentEventPaidInGoogleCalendar = async (
   accessToken: string,
   calendarId: string,
   payment: MarkRegularPaymentPaidPayload
-): Promise<string | null> => {
-  if (!accessToken) return null;
-  const targetCalId = encodeURIComponent(calendarId || 'primary');
-  const curr = payment.currency || 'USD';
-  const rawDate = (payment.dueDate || '').split('T')[0] || new Date().toISOString().split('T')[0];
-  const parts = rawDate.split('-').map(Number);
-  const y = parts[0] || new Date().getFullYear();
-  const m = parts[1] || (new Date().getMonth() + 1);
-  const d = parts[2] || new Date().getDate();
-  const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+): Promise<string> => {
+  if (!accessToken) {
+    throw new Error('Google erişim anahtarı bulunamadı.');
+  }
 
+  if (!payment.id || typeof payment.id !== 'string' || payment.id.trim() === '') {
+    throw new Error('Düzenli ödeme kayıt kimliği (id) belirtilmedi.');
+  }
+
+  // Resolve and validate payment date & target period for the PAID period (not next payment date)
+  const resolvedDueDate = payment.dueDate || (payment.paidPeriod ? `${payment.paidPeriod}-01` : '');
+  if (!resolvedDueDate) {
+    throw new Error('Ödenen dönem (paidPeriod) veya vade tarihi (dueDate) belirtilmedi.');
+  }
+
+  const { dateStr, targetPeriod, year: y, month: m, day: d } = validateAndResolvePaymentDate(
+    resolvedDueDate,
+    payment.paidPeriod
+  );
+
+  // Check actual proof of payment for this explicit paid targetPeriod. Auto-payment preference is NOT proof!
+  const hasProof = Boolean(
+    payment.isPaid ||
+    isRegularPaymentPaidForPeriod(payment, targetPeriod)
+  );
+
+  if (!hasProof) {
+    throw new Error(`"${payment.name}" ödemesi için "${targetPeriod}" dönemine ait doğrulanmış bir ödeme kaydı bulunamadı. Otomatik ödeme talimatı veya tercihi tek başına ödeme kanıtı sayılamaz.`);
+  }
+
+  const targetCalId = encodeURIComponent(calendarId || 'primary');
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() + 1);
   const endDateStr = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+  const curr = payment.currency || 'USD';
 
-  const isAuto = payment.isAutoPayment ?? true;
-  const summary = `✅ [ÖDENDİ${isAuto ? ' - Otomatik Ödeme' : ''}] ${payment.name} - ${payment.amount.toFixed(2)} ${curr}${payment.payee ? ` (${payment.payee})` : ''}`;
-  const description = `✅ BU DÜZENLİ ÖDEME SUBTRACK ÜZERİNDEN BAŞARIYLA ÖDENDİ OLARAK İŞARETLENDİ!\n\n` +
-    `🏷️ Ödeme: ${payment.name}\n` +
-    (payment.payee ? `🏢 Alıcı: ${payment.payee}\n` : '') +
-    `💵 Tutar: ${payment.amount.toFixed(2)} ${curr}\n` +
-    `📅 Vade / Ödeme Tarihi: ${dateStr}\n` +
-    (isAuto ? `🔄 Ödeme Türü: Otomatik Ödeme Talimatı ile Günü Geldiğinde Ödendi\n` : `✋ Ödeme Türü: Manuel Ödendi\n`) +
-    `\nBu ödemenin günü geldiğinde SubTrack tarafından otomatik olarak ödendiği onaylanmış ve Google Takvim'de yeşil renkle (Ödendi) güncellenmiştir.`;
+  // Use the same deterministic ID format as regular synchronization
+  const stableEventId = generateStableCalendarEventId('reg', payment.id, targetPeriod);
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
 
   try {
-    let targetEventId = payment.eventId;
+    let verifiedEventId: string | undefined;
 
-    // If eventId wasn't known, search Google Calendar for matching event in the month
-    if (!targetEventId) {
-      try {
-        const searchMin = `${y}-${String(m).padStart(2, '0')}-01T00:00:00Z`;
-        const endMonthDate = new Date(Date.UTC(y, m, 0));
-        const searchMax = `${y}-${String(m).padStart(2, '0')}-${String(endMonthDate.getUTCDate()).padStart(2, '0')}T23:59:59Z`;
-        const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events?timeMin=${encodeURIComponent(searchMin)}&timeMax=${encodeURIComponent(searchMax)}&q=${encodeURIComponent(payment.name)}`;
-        const searchRes = await fetch(searchUrl, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          signal: controller.signal
-        });
-        if (searchRes.ok) {
-          const searchData = await searchRes.json();
-          if (searchData.items && searchData.items.length > 0) {
-            const match = searchData.items.find((item: any) => 
-              item.start?.date === dateStr || 
-              (item.summary && item.summary.toLowerCase().includes(payment.name.toLowerCase()))
-            ) || searchData.items[0];
-            targetEventId = match?.id;
+    if (payment.eventId) {
+      if (payment.eventId === stableEventId) {
+        verifiedEventId = stableEventId;
+      } else {
+        const checkUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${encodeURIComponent(payment.eventId)}`;
+        let checkRes: Response;
+        try {
+          checkRes = await fetch(checkUrl, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            signal: controller.signal
+          });
+        } catch (fetchErr: unknown) {
+          if (controller.signal.aborted) {
+            throw new Error(`Google Takvim doğrulama isteği zaman aşımına uğradı (timeout). Mevcut etkinlik (${payment.eventId}) durumu doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+          }
+          const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+          throw new Error(`Google Takvim ağına erişilemedi (ağ hatası: ${msg}). Mevcut etkinlik (${payment.eventId}) durumu doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+        }
+
+        if (checkRes.status === 404) {
+          // Kesin 404: Takvimde mevcut değil; bu ödenen dönem için deterministik kimlik ile sıfırdan oluşturulabilir
+          verifiedEventId = undefined;
+        } else if (!checkRes.ok) {
+          if (checkRes.status === 401) {
+            setCachedAccessToken(null);
+            throw new Error(`Google Takvim oturum süresi doldu (401). Mevcut etkinlik (${payment.eventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu. Lütfen Google Takvim bağlantısını yenileyin.`);
+          }
+          if (checkRes.status === 403) {
+            throw new Error(`Google Takvim erişim yetkisi veya kota hatası (403). Mevcut etkinlik (${payment.eventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+          }
+          if (checkRes.status === 429) {
+            throw new Error(`Google Takvim istek limiti aşıldı (429). Mevcut etkinlik (${payment.eventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+          }
+          if (checkRes.status >= 500) {
+            throw new Error(`Google Takvim sunucu hatası (${checkRes.status}). Mevcut etkinlik (${payment.eventId}) durumu doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+          }
+          throw new Error(`Google Takvim doğrulama hatası (${checkRes.status}). Mevcut etkinlik (${payment.eventId}) durumu doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+        } else {
+          // 200 OK: validateCalendarEventResponse ile yapı ve metadata kontrolü yap
+          let rawParsed: unknown;
+          try {
+            rawParsed = await checkRes.json();
+          } catch (jsonErr: unknown) {
+            const msg = jsonErr instanceof Error ? jsonErr.message : String(jsonErr);
+            throw new Error(`Google Takvim yanıtı çözümlenemedi (bozuk yanıt: ${msg}). Mevcut etkinlik (${payment.eventId}) durumu doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+          }
+
+          const checkData = validateCalendarEventResponse(rawParsed, payment.eventId);
+          const priv = checkData.extendedProperties?.private;
+
+          if (priv?.budfolApp === 'budfol' && priv?.budfolRecordId === payment.id && priv?.budfolPeriod === targetPeriod) {
+            // Aynı uygulama, kayıt ve ödenen hedef dönem doğrulandı: bu mevcut etkinliği güncelle
+            verifiedEventId = payment.eventId;
+          } else {
+            // Metadata içermeyen fakat geçerli kişisel etkinlik veya farklı kayıt/dönem tespiti:
+            // Bu mevcut etkinliğin üzerine yazılmaz; bu ödenen dönem için deterministik kimlik kullanılır.
+            verifiedEventId = undefined;
           }
         }
-      } catch (searchErr) {
-        console.warn('Could not search for existing calendar event:', searchErr);
       }
     }
 
-    if (targetEventId) {
-      const patchUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${targetEventId}`;
-      const patchRes = await fetch(patchUrl, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          summary,
-          description,
-          colorId: '10', // Forest Green / Basil
-          transparency: 'transparent',
-          reminders: {
-            useDefault: false,
-            overrides: []
-          }
-        }),
-        signal: controller.signal
-      });
+    const targetEventId = verifiedEventId || stableEventId;
 
-      if (patchRes.ok) {
-        const patchData = await patchRes.json();
-        return patchData.id || targetEventId;
-      }
+    const summary = `✅ [ÖDENDİ] ${payment.name} - ${payment.amount.toFixed(2)} ${curr}${payment.payee ? ` (${payment.payee})` : ''}`;
+    const description = `✅ BU DÜZENLİ ÖDEME BUDFOL TARAFINDAN ÖDENDİ OLARAK KAYDEDİLDİ!\n\n` +
+      `🏷️ Ödeme: ${payment.name}\n` +
+      (payment.payee ? `🏢 Alıcı: ${payment.payee}\n` : '') +
+      `💵 Tutar: ${payment.amount.toFixed(2)} ${curr}\n` +
+      `📅 Vade / Ödeme Tarihi: ${dateStr}\n` +
+      `🔄 Ödeme Durumu: Ödendi (Yeşil)\n` +
+      `🎯 Hedef Dönem: ${targetPeriod}\n` +
+      (payment.isAutoPayment ? `⚙️ Ödeme Tercihi: Otomatik Ödeme Talimatlı\n` : `⚙️ Ödeme Tercihi: Manuel Ödeme\n`) +
+      (payment.accountOrSubscriberNo ? `🔢 Abone/Tesisat/IBAN: ${payment.accountOrSubscriberNo}\n` : '') +
+      (payment.bankOrCard ? `🏦 Ödeme Hesabı/Kartı: ${payment.bankOrCard}\n` : '') +
+      (payment.note ? `📝 Not: ${payment.note}\n` : '') +
+      `\nBu etkinlik Budfol tarafından Google Takvim'de güncellenmiştir.`;
 
-      if (patchRes.status === 401) {
-        setCachedAccessToken(null);
-        return null;
-      }
-    }
+    const eventBody = {
+      id: targetEventId,
+      summary,
+      description,
+      start: { date: dateStr },
+      end: { date: endDateStr },
+      colorId: '10', // Forest Green / Basil
+      reminders: {
+        useDefault: false,
+        overrides: []
+      },
+      extendedProperties: {
+        private: {
+          budfolApp: 'budfol',
+          budfolType: 'regular_payment',
+          budfolRecordId: payment.id,
+          budfolPeriod: targetPeriod
+        }
+      },
+      transparency: 'transparent'
+    };
 
-    // If targetEventId was missing or PATCH returned 404, CREATE a fresh green event with POST
-    const createUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events`;
-    const postRes = await fetch(createUrl, {
-      method: 'POST',
+    const putUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${targetEventId}`;
+    let res = await fetch(putUrl, {
+      method: 'PUT',
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        summary,
-        description,
-        start: { date: dateStr },
-        end: { date: endDateStr },
-        colorId: '10', // Forest Green / Basil
-        transparency: 'transparent',
-        reminders: {
-          useDefault: false,
-          overrides: []
-        }
-      }),
+      body: JSON.stringify(eventBody),
       signal: controller.signal
     });
 
-    if (postRes.ok) {
-      const postData = await postRes.json();
-      return postData.id;
+    if (res.status === 404) {
+      const postUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events`;
+      res = await fetch(postUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(eventBody),
+        signal: controller.signal
+      });
+
+      if (res.status === 409) {
+        res = await fetch(putUrl, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(eventBody),
+          signal: controller.signal
+        });
+      }
     }
-  } catch (err) {
-    console.warn('Could not mark regular payment as paid in Google Calendar:', err);
+
+    if (!res.ok) {
+      if (res.status === 401) {
+        setCachedAccessToken(null);
+        throw new Error('Oturum süresi doldu (401). Lütfen Google Takvim bağlantısını yenileyin.');
+      }
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error?.message || `Takvim etkinliği güncellenemedi (${res.status})`);
+    }
+
+    const data = await res.json();
+    return data.id || targetEventId;
   } finally {
     clearTimeout(timeoutId);
   }
-  return null;
 };
 
 /**

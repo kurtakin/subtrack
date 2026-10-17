@@ -896,14 +896,26 @@ export default function App() {
       const targetCalId = profile?.calendarSettings?.calendarId || 'primary';
       if (token) {
         try {
+          const paidPeriod = target.nextPaymentDate ? target.nextPaymentDate.slice(0, 7) : currentMonth;
+          const paidDueDate = target.nextPaymentDate || todayStr;
           const paidEventId = await markRegularPaymentEventPaidInGoogleCalendar(token, targetCalId, {
+            id: target.id,
+            paidPeriod,
+            dueDate: paidDueDate,
             eventId: target.calendarEventId,
             name: target.name,
             amount: target.amount,
             currency: profile?.currency || 'USD',
             payee: target.payee,
-            dueDate: target.nextPaymentDate,
-            isAutoPayment: target.isAutoPayment
+            category: target.category,
+            isAutoPayment: target.isAutoPayment,
+            isPaid: true,
+            lastPaidMonth: updatedPayment.lastPaidMonth,
+            paidMonths: updatedPayment.paidMonths,
+            paymentHistory: updatedPayment.paymentHistory,
+            bankOrCard: target.bankOrCard,
+            accountOrSubscriberNo: target.accountOrSubscriberNo,
+            note: target.note
           });
 
           // Also schedule the upcoming next month event on Google Calendar so it is tracked in orange
@@ -1547,15 +1559,27 @@ export default function App() {
                 // Execute auto-payment and update calendar event to green
                 await handlePayRegularPayment(regPay.id);
               } else if (token) {
-                // Already marked paid in SubTrack, ensure Google Calendar event is green
+                // Already marked paid in Budfol, ensure Google Calendar event is green
+                const paidPeriod = regPay.lastPaidMonth || curMonthStr;
+                const paidDueDate = regPay.lastPaidDate || regPay.nextPaymentDate || `${paidPeriod}-01`;
                 markRegularPaymentEventPaidInGoogleCalendar(token, targetCalId, {
+                  id: regPay.id,
+                  paidPeriod,
+                  dueDate: paidDueDate,
                   eventId: regPay.calendarEventId,
                   name: regPay.name,
                   amount: regPay.amount,
                   currency: profile?.currency || 'USD',
                   payee: regPay.payee,
-                  dueDate: regPay.lastPaidDate || regPay.nextPaymentDate,
-                  isAutoPayment: true
+                  category: regPay.category,
+                  isAutoPayment: regPay.isAutoPayment,
+                  isPaid: true,
+                  lastPaidMonth: regPay.lastPaidMonth,
+                  paidMonths: regPay.paidMonths,
+                  paymentHistory: regPay.paymentHistory,
+                  bankOrCard: regPay.bankOrCard,
+                  accountOrSubscriberNo: regPay.accountOrSubscriberNo,
+                  note: regPay.note
                 }).catch(() => {});
               }
             }
