@@ -1006,13 +1006,13 @@ export function isGoogleCalendarEvent(
   if (typeof obj.id !== 'string' || obj.id.trim() === '' || obj.id !== expectedEventId) {
     return false;
   }
-  if ('extendedProperties' in obj && obj.extendedProperties !== undefined && obj.extendedProperties !== null) {
-    if (typeof obj.extendedProperties !== 'object' || Array.isArray(obj.extendedProperties)) {
+  if ('extendedProperties' in obj && obj.extendedProperties !== undefined) {
+    if (obj.extendedProperties === null || typeof obj.extendedProperties !== 'object' || Array.isArray(obj.extendedProperties)) {
       return false;
     }
     const ext = obj.extendedProperties as Record<string, unknown>;
-    if ('private' in ext && ext.private !== undefined && ext.private !== null) {
-      if (typeof ext.private !== 'object' || Array.isArray(ext.private)) {
+    if ('private' in ext && ext.private !== undefined) {
+      if (ext.private === null || typeof ext.private !== 'object' || Array.isArray(ext.private)) {
         return false;
       }
       const priv = ext.private as Record<string, unknown>;
@@ -1029,7 +1029,7 @@ export function isGoogleCalendarEvent(
 
 /**
  * Validates Google Calendar verification GET response at runtime with descriptive errors.
- * Rejects arrays ([]), empty objects ({}), missing/mismatched id, and malformed metadata.
+ * Rejects arrays ([]), empty objects ({}), missing/mismatched id, null metadata, and malformed metadata.
  * Differentiates valid personal events (events without budfol metadata) from corrupt responses.
  */
 export function validateCalendarEventResponse(
@@ -1051,12 +1051,18 @@ export function validateCalendarEventResponse(
     throw new Error(`Google Takvim yanıtındaki etkinlik kimliği ("${obj.id}") istenen mevcut etkinlik kimliği ("${expectedEventId}") ile eşleşmiyor. Mevcut etkinlik doğrulanamadığı için takvim yazma işlemi durduruldu.`);
   }
 
-  if ('extendedProperties' in obj && obj.extendedProperties !== undefined && obj.extendedProperties !== null) {
+  if ('extendedProperties' in obj && obj.extendedProperties !== undefined) {
+    if (obj.extendedProperties === null) {
+      throw new Error(`Google Takvim etkinliğinin 'extendedProperties' alanı null olamaz (geçersiz nesne yapısı). Mevcut etkinlik (${expectedEventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+    }
     if (typeof obj.extendedProperties !== 'object' || Array.isArray(obj.extendedProperties)) {
       throw new Error(`Google Takvim etkinliğinin 'extendedProperties' alanı geçersiz bir tipe sahip (nesne bekleniyor). Mevcut etkinlik (${expectedEventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu.`);
     }
     const ext = obj.extendedProperties as Record<string, unknown>;
-    if ('private' in ext && ext.private !== undefined && ext.private !== null) {
+    if ('private' in ext && ext.private !== undefined) {
+      if (ext.private === null) {
+        throw new Error(`Google Takvim etkinliğinin 'extendedProperties.private' alanı null olamaz (geçersiz nesne yapısı). Mevcut etkinlik (${expectedEventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+      }
       if (typeof ext.private !== 'object' || Array.isArray(ext.private)) {
         throw new Error(`Google Takvim etkinliğinin 'extendedProperties.private' alanı geçersiz bir tipe sahip (nesne bekleniyor). Mevcut etkinlik (${expectedEventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu.`);
       }
