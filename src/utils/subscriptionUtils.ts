@@ -29,8 +29,8 @@ export function cleanSubscriptionPayload(
   if (sub.isAutoPayment !== undefined) {
     result.isAutoPayment = sub.isAutoPayment;
   }
-  if (sub.note !== undefined && sub.note.trim() !== '') {
-    result.note = sub.note.trim();
+  if (sub.note !== undefined) {
+    result.note = sub.note;
   }
   if (sub.isPaid !== undefined) {
     result.isPaid = sub.isPaid;

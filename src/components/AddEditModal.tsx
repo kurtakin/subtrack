@@ -187,7 +187,7 @@ export const AddEditModal = ({
 
     if (sub) {
       if (sub.isAutoPayment !== undefined) baseData.isAutoPayment = sub.isAutoPayment;
-      if (sub.note !== undefined && sub.note.trim() !== '') baseData.note = sub.note.trim();
+      if (sub.note !== undefined) baseData.note = sub.note;
       if (sub.isPaid !== undefined) baseData.isPaid = sub.isPaid;
       if (sub.lastPaidMonth !== undefined) baseData.lastPaidMonth = sub.lastPaidMonth;
       if (sub.lastPaidDate !== undefined) baseData.lastPaidDate = sub.lastPaidDate;
