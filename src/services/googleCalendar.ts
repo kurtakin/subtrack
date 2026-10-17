@@ -974,6 +974,109 @@ export function isRegularPaymentPaidForPeriod(
   return false;
 }
 
+export interface GoogleCalendarVerifiedEvent {
+  id: string;
+  summary?: string;
+  description?: string;
+  extendedProperties?: {
+    private?: {
+      budfolApp?: string;
+      budfolRecordId?: string;
+      budfolPeriod?: string;
+      budfolType?: string;
+      [key: string]: string | undefined;
+    };
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+/**
+ * Runtime type guard: Checks if an unknown value is a valid non-array Google Calendar event object
+ * with a valid non-empty string 'id' matching expectedEventId, and valid types for metadata if present.
+ */
+export function isGoogleCalendarEvent(
+  val: unknown,
+  expectedEventId: string
+): val is GoogleCalendarVerifiedEvent {
+  if (val === null || typeof val !== 'object' || Array.isArray(val)) {
+    return false;
+  }
+  const obj = val as Record<string, unknown>;
+  if (typeof obj.id !== 'string' || obj.id.trim() === '' || obj.id !== expectedEventId) {
+    return false;
+  }
+  if ('extendedProperties' in obj && obj.extendedProperties !== undefined && obj.extendedProperties !== null) {
+    if (typeof obj.extendedProperties !== 'object' || Array.isArray(obj.extendedProperties)) {
+      return false;
+    }
+    const ext = obj.extendedProperties as Record<string, unknown>;
+    if ('private' in ext && ext.private !== undefined && ext.private !== null) {
+      if (typeof ext.private !== 'object' || Array.isArray(ext.private)) {
+        return false;
+      }
+      const priv = ext.private as Record<string, unknown>;
+      const metadataFields = ['budfolApp', 'budfolRecordId', 'budfolPeriod', 'budfolType'];
+      for (const field of metadataFields) {
+        if (field in priv && priv[field] !== undefined && typeof priv[field] !== 'string') {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * Validates Google Calendar verification GET response at runtime with descriptive errors.
+ * Rejects arrays ([]), empty objects ({}), missing/mismatched id, and malformed metadata.
+ * Differentiates valid personal events (events without budfol metadata) from corrupt responses.
+ */
+export function validateCalendarEventResponse(
+  rawParsed: unknown,
+  expectedEventId: string
+): GoogleCalendarVerifiedEvent {
+  if (rawParsed === null || typeof rawParsed !== 'object') {
+    throw new Error(`Google Takvim doğrulama yanıtı geçersiz nesne yapısına sahip (null veya ilkel değer). Mevcut etkinlik (${expectedEventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+  }
+  if (Array.isArray(rawParsed)) {
+    throw new Error(`Google Takvim doğrulama yanıtı dizi ([]) olarak döndü, etkinlik nesnesi bekleniyordu. Mevcut etkinlik (${expectedEventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+  }
+
+  const obj = rawParsed as Record<string, unknown>;
+  if (!('id' in obj) || typeof obj.id !== 'string' || obj.id.trim() === '') {
+    throw new Error(`Google Takvim etkinlik yanıtında 'id' alanı eksik veya boş. Mevcut etkinlik (${expectedEventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+  }
+  if (obj.id !== expectedEventId) {
+    throw new Error(`Google Takvim yanıtındaki etkinlik kimliği ("${obj.id}") istenen mevcut etkinlik kimliği ("${expectedEventId}") ile eşleşmiyor. Mevcut etkinlik doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+  }
+
+  if ('extendedProperties' in obj && obj.extendedProperties !== undefined && obj.extendedProperties !== null) {
+    if (typeof obj.extendedProperties !== 'object' || Array.isArray(obj.extendedProperties)) {
+      throw new Error(`Google Takvim etkinliğinin 'extendedProperties' alanı geçersiz bir tipe sahip (nesne bekleniyor). Mevcut etkinlik (${expectedEventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+    }
+    const ext = obj.extendedProperties as Record<string, unknown>;
+    if ('private' in ext && ext.private !== undefined && ext.private !== null) {
+      if (typeof ext.private !== 'object' || Array.isArray(ext.private)) {
+        throw new Error(`Google Takvim etkinliğinin 'extendedProperties.private' alanı geçersiz bir tipe sahip (nesne bekleniyor). Mevcut etkinlik (${expectedEventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+      }
+      const priv = ext.private as Record<string, unknown>;
+      const metadataFields = ['budfolApp', 'budfolRecordId', 'budfolPeriod', 'budfolType'];
+      for (const field of metadataFields) {
+        if (field in priv && priv[field] !== undefined && typeof priv[field] !== 'string') {
+          throw new Error(`Google Takvim etkinliğinin '${field}' metadata alanı geçersiz bir tipe sahip (string bekleniyor, alınan tip: ${typeof priv[field]}). Mevcut etkinlik (${expectedEventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+        }
+      }
+    }
+  }
+
+  if (!isGoogleCalendarEvent(rawParsed, expectedEventId)) {
+    throw new Error(`Google Takvim etkinlik yanıtı çalışma zamanı tip doğrulamasını geçemedi. Mevcut etkinlik (${expectedEventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+  }
+
+  return rawParsed;
+}
+
 /**
  * Syncs a regular payment (Kira, Fatura, Kişiler, vb.) to Google Calendar using stable source identifier.
  * Payment status, stable event ID, and budfolPeriod all strictly use the same explicit target period.
@@ -1074,45 +1177,25 @@ export const syncRegularPaymentToGoogleCalendar = async (
           }
           throw new Error(`Google Takvim doğrulama hatası (${checkRes.status}). Mevcut etkinlik (${existingEventId}) durumu doğrulanamadığı için takvim yazma işlemi durduruldu.`);
         } else {
-          // 200 OK: Gövdeyi çözümle ve sahiplik/dönem kontrolü yap
-          let checkData: {
-            id?: string;
-            extendedProperties?: {
-              private?: {
-                budfolApp?: string;
-                budfolRecordId?: string;
-                budfolPeriod?: string;
-              };
-            };
-          };
+          // 200 OK: Gövdeyi runtime type guard ile doğrula ve sahiplik/dönem kontrolü yap
+          let rawParsed: unknown;
           try {
-            const rawParsed: unknown = await checkRes.json();
-            if (!rawParsed || typeof rawParsed !== 'object') {
-              throw new Error('Geçersiz yanıt nesnesi');
-            }
-            checkData = rawParsed as {
-              id?: string;
-              extendedProperties?: {
-                private?: {
-                  budfolApp?: string;
-                  budfolRecordId?: string;
-                  budfolPeriod?: string;
-                };
-              };
-            };
+            rawParsed = await checkRes.json();
           } catch (jsonErr: unknown) {
             const msg = jsonErr instanceof Error ? jsonErr.message : String(jsonErr);
             throw new Error(`Google Takvim yanıtı çözümlenemedi (bozuk yanıt: ${msg}). Mevcut etkinlik (${existingEventId}) durumu doğrulanamadığı için takvim yazma işlemi durduruldu.`);
           }
+
+          const checkData = validateCalendarEventResponse(rawParsed, existingEventId);
 
           const priv = checkData.extendedProperties?.private;
           if (priv?.budfolApp === 'budfol' && priv?.budfolRecordId === payment.id && priv?.budfolPeriod === targetPeriod) {
             // Aynı kayıt ve hedef dönem doğrulandı: mevcut etkinliği kullan
             verifiedEventId = existingEventId;
           } else {
-            // Başarılı ve geçerli yanıtta farklı kayıt/dönem tespiti:
-            // Sahiplik ve dönem biliniyor ancak bu kayıt ve hedef döneme ait değil.
-            // Bu eski etkinliğin üzerine yazılmaz, bu hedef dönem için deterministik kimlik kullanılır.
+            // Metadata içermeyen fakat geçerli kişisel etkinlik veya farklı kayıt/dönem tespiti:
+            // Sahiplik ve dönem doğrulandı ancak bu kayıt ve hedef döneme ait değil (veya kişisel etkinlik).
+            // Bu mevcut etkinliğin üzerine yazılmaz; bu hedef dönem için deterministik kimlik kullanılır.
             verifiedEventId = undefined;
           }
         }
