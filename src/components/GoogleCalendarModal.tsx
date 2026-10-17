@@ -826,10 +826,12 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
 
       // 1. Regular payments that are actually paid
       for (const reg of regularPayments) {
+        const regPeriod = reg.nextPaymentDate ? reg.nextPaymentDate.slice(0, 7) : currentMonthStr;
         const isRegPaid = reg.status === 'active' && Boolean(
-          reg.isPaid ||
+          reg.lastPaidMonth === regPeriod ||
           reg.lastPaidMonth === currentMonthStr ||
-          (reg.paidMonths && reg.paidMonths.includes(currentMonthStr))
+          (reg.paidMonths && (reg.paidMonths.includes(regPeriod) || reg.paidMonths.includes(currentMonthStr))) ||
+          (reg.paymentHistory && reg.paymentHistory.some(h => h.month === regPeriod || h.month === currentMonthStr))
         );
         if (isRegPaid) {
           try {

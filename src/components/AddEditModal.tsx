@@ -177,7 +177,12 @@ export const AddEditModal = ({
       nextPaymentDate: new Date(formData.nextPaymentDate).toISOString(),
       status: formData.status,
       icon: formData.icon,
-      pricingType: formData.pricingType
+      pricingType: formData.pricingType,
+      isAutoPayment: sub?.isAutoPayment,
+      note: sub?.note,
+      isPaid: sub?.isPaid,
+      lastPaidMonth: sub?.lastPaidMonth,
+      lastPaidDate: sub?.lastPaidDate
     };
 
     const subId = sub?.id || `sub_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;

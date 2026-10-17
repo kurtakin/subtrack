@@ -1023,10 +1023,12 @@ export default function App() {
     try {
       const todayStr = new Date().toISOString().split('T')[0];
       const curMonth = format(new Date(), 'yyyy-MM');
+      const paymentPeriod = payment.nextPaymentDate ? payment.nextPaymentDate.slice(0, 7) : curMonth;
       const isPaid = Boolean(
-        payment.isPaid ||
+        payment.lastPaidMonth === paymentPeriod ||
         payment.lastPaidMonth === curMonth ||
-        (payment.paidMonths && payment.paidMonths.includes(curMonth))
+        (payment.paidMonths && (payment.paidMonths.includes(paymentPeriod) || payment.paidMonths.includes(curMonth))) ||
+        (payment.paymentHistory && payment.paymentHistory.some(h => h.month === paymentPeriod || h.month === curMonth))
       );
 
       const targetCalId = profile?.calendarSettings?.calendarId || 'primary';
