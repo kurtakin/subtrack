@@ -876,21 +876,82 @@ export const syncInstallmentToGoogleCalendar = async (
 };
 
 /**
+ * Returns the exact number of calendar days in a given year and month.
+ * Correctly accounts for leap years in February.
+ */
+export function getDaysInCalendarMonth(year: number, month: number): number {
+  if (month === 2) {
+    const isLeap = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+    return isLeap ? 29 : 28;
+  }
+  if (month === 4 || month === 6 || month === 9 || month === 11) {
+    return 30;
+  }
+  return 31;
+}
+
+/**
+ * Validates date format strictly as YYYY-MM-DD (with optional standard ISO time),
+ * verifies real calendar days (rejecting Feb 31, day 00, day 32, corrupt suffixes, etc.),
+ * and ensures that explicit targetPeriod (if provided) matches the month of nextPaymentDate.
+ * Throws a descriptive error BEFORE any API request.
+ */
+export function validateAndResolvePaymentDate(
+  nextPaymentDate: string,
+  targetPeriod?: string
+): { year: number; month: number; day: number; dateStr: string; targetPeriod: string } {
+  if (!nextPaymentDate || typeof nextPaymentDate !== 'string') {
+    throw new Error('Düzenli ödeme için hedef dönem belirlenemedi: nextPaymentDate eksik veya boş.');
+  }
+
+  const trimmed = nextPaymentDate.trim();
+  // Strictly validate date format: YYYY-MM-DD, or standard ISO timestamp YYYY-MM-DDTHH:mm:ss(Z)
+  // Rejects invalid days like 00, 32, Feb 31, and broken suffixes like "-suffix", "_corrupted", etc.
+  const dateRegex = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])(?:T[0-2]\d:[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-][0-2]\d:?[0-5]\d)?)?$/;
+  const match = trimmed.match(dateRegex);
+  if (!match) {
+    throw new Error(`Düzenli ödeme vade tarihi YYYY-MM-DD formatında geçerli bir takvim tarihi olmalıdır. Alınan değer: "${nextPaymentDate}".`);
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+
+  // Strict calendar day validation
+  const maxDays = getDaysInCalendarMonth(year, month);
+  if (day < 1 || day > maxDays) {
+    throw new Error(`Geçersiz takvim günü: "${nextPaymentDate}". ${year}-${String(month).padStart(2, '0')} dönemi için gün 1 ile ${maxDays} arasında olmalıdır.`);
+  }
+
+  const resolvedPeriod = `${year}-${String(month).padStart(2, '0')}`;
+  const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+  // Check if explicit targetPeriod conflicts with nextPaymentDate
+  if (targetPeriod && targetPeriod.trim()) {
+    const cleanPeriod = targetPeriod.trim();
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(cleanPeriod)) {
+      throw new Error(`Geçersiz hedef dönem formatı: "${targetPeriod}". Format YYYY-MM olmalıdır.`);
+    }
+    if (cleanPeriod !== resolvedPeriod) {
+      throw new Error(`Hedef dönem ("${cleanPeriod}") ile vade tarihinin dönemi ("${resolvedPeriod}") çelişiyor. Lütfen tarihleri kontrol edin.`);
+    }
+  }
+
+  return { year, month, day, dateStr, targetPeriod: resolvedPeriod };
+}
+
+/**
  * Resolves the explicit target period (YYYY-MM) for a regular payment.
- * If targetPeriod is provided and valid, uses it.
- * Otherwise extracts it strictly from nextPaymentDate (YYYY-MM-DD).
+ * Validates date format, real calendar days, and detects conflicts before returning.
  * If neither provides a valid period, throws a descriptive error and NEVER defaults to current month.
  */
 export function resolveTargetPeriod(targetPeriod?: string, nextPaymentDate?: string): string {
+  if (nextPaymentDate && typeof nextPaymentDate === 'string') {
+    const validated = validateAndResolvePaymentDate(nextPaymentDate, targetPeriod);
+    return validated.targetPeriod;
+  }
   if (targetPeriod && /^\d{4}-(0[1-9]|1[0-2])$/.test(targetPeriod.trim())) {
     return targetPeriod.trim();
-  }
-  if (nextPaymentDate && typeof nextPaymentDate === 'string') {
-    const raw = nextPaymentDate.split('T')[0].trim();
-    const match = raw.match(/^(\d{4})-(0[1-9]|1[0-2])/);
-    if (match) {
-      return `${match[1]}-${match[2]}`;
-    }
   }
   throw new Error('Düzenli ödeme için hedef dönem belirlenemedi. Lütfen geçerli bir vade tarihi (YYYY-MM-DD) veya hedef dönem (YYYY-MM) belirtin.');
 }
@@ -946,37 +1007,56 @@ export const syncRegularPaymentToGoogleCalendar = async (
     throw new Error('Google erişim anahtarı bulunamadı.');
   }
 
-  // 1. Resolve explicit target period (throws descriptive error if it cannot be determined, never falls back to current month)
-  const targetPeriod = resolveTargetPeriod(payment.targetPeriod, payment.nextPaymentDate);
-
-  // Validate nextPaymentDate format strictly
-  if (!payment.nextPaymentDate || typeof payment.nextPaymentDate !== 'string') {
-    throw new Error('Düzenli ödeme için hedef dönem belirlenemedi: nextPaymentDate eksik veya boş.');
-  }
-  const rawDateStr = payment.nextPaymentDate.split('T')[0].trim();
-  const dateMatch = rawDateStr.match(/^(\d{4})-(0[1-9]|1[0-2])-([0-3]\d)$/);
-  if (!dateMatch) {
-    throw new Error(`Düzenli ödeme vade tarihi YYYY-MM-DD formatında olmalıdır. Alınan değer: "${payment.nextPaymentDate}".`);
-  }
+  // 1 & 2 & 3: Validate date format, real calendar days, and ensure targetPeriod and nextPaymentDate do NOT conflict.
+  // Throws descriptive error BEFORE any API call.
+  const { dateStr, targetPeriod, year: y, month: m, day: d } = validateAndResolvePaymentDate(
+    payment.nextPaymentDate,
+    payment.targetPeriod
+  );
 
   const targetCalId = encodeURIComponent(calendarId || 'primary');
-  const y = Number(dateMatch[1]);
-  const m = Number(dateMatch[2]);
-  const d = Number(dateMatch[3]);
-  const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() + 1);
   const endDateStr = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
   const curr = payment.currency || 'USD';
 
-  // 2. Determine actual payment status STRICTLY for this targetPeriod.
-  // CRITICAL:
-  // - Auto-payment preference (isAutoPayment) is NOT treated as proof of payment!
-  // - Current month payment does NOT count as payment for a different target period!
+  // Determine actual payment status strictly for targetPeriod.
   const isActuallyPaid = payment.isPaid !== undefined
     ? payment.isPaid
     : isRegularPaymentPaidForPeriod(payment, targetPeriod);
+
+  // Default write target is the deterministic ID for this record and target period
+  const stableEventId = generateStableCalendarEventId('reg', payment.id, targetPeriod);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+  // Verify existingEventId: only use existingEventId if it is verified to belong to the SAME app, record, calendar, and target period!
+  let verifiedEventId: string | undefined;
+  if (existingEventId) {
+    if (existingEventId === stableEventId) {
+      verifiedEventId = stableEventId;
+    } else {
+      try {
+        const checkUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${encodeURIComponent(existingEventId)}`;
+        const checkRes = await fetch(checkUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          signal: controller.signal
+        });
+        if (checkRes.ok) {
+          const checkData = await checkRes.json();
+          const p = checkData.extendedProperties?.private;
+          if (p?.budfolApp === 'budfol' && p?.budfolRecordId === payment.id && p?.budfolPeriod === targetPeriod) {
+            verifiedEventId = existingEventId;
+          }
+        }
+      } catch {
+        // Verification failed; do not overwrite or adopt
+      }
+    }
+  }
+
+  const targetEventId = verifiedEventId || stableEventId;
 
   const categoryLabels: Record<string, string> = {
     rent: '🏠 Kira',
@@ -991,12 +1071,6 @@ export const syncRegularPaymentToGoogleCalendar = async (
     other: '💳 Düzenli Ödeme'
   };
   const catLabel = categoryLabels[payment.category] || '💳 Aylık Ödeme';
-
-  // 3. Kararlı etkinlik kimliği (Stable event ID) MUST use the exact targetPeriod
-  const stableEventId = generateStableCalendarEventId('reg', payment.id, targetPeriod);
-  const targetEventId = (existingEventId && existingEventId.startsWith('budfol') && existingEventId !== stableEventId)
-    ? stableEventId
-    : (existingEventId || stableEventId);
 
   const summary = isActuallyPaid
     ? `✅ [ÖDENDİ] ${payment.name} - ${payment.amount.toFixed(2)} ${curr}${payment.payee ? ` (${payment.payee})` : ''}`
@@ -1054,9 +1128,6 @@ export const syncRegularPaymentToGoogleCalendar = async (
     },
     transparency: 'transparent'
   };
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
 
   try {
     const putUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${targetEventId}`;
