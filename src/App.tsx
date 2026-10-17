@@ -113,6 +113,7 @@ import {
   markInstallmentEventPaidInGoogleCalendar,
   unmarkInstallmentEventPaidInGoogleCalendar,
   syncRegularPaymentToGoogleCalendar,
+  validateAndResolvePaymentDate,
   resolveTargetPeriod,
   isRegularPaymentPaidForPeriod,
   markRegularPaymentEventPaidInGoogleCalendar,
@@ -856,12 +857,21 @@ export default function App() {
   const handlePayRegularPayment = async (id: string) => {
     const target = regularPayments.find(p => p.id === id);
     if (!target) return;
+
+    // Validate due date and resolve explicit paid period BEFORE any state, cache, or Firestore update.
+    // Strictly stops with descriptive error if due date is invalid or missing. No silent fallback to current month or today!
+    if (!target.nextPaymentDate || typeof target.nextPaymentDate !== 'string' || target.nextPaymentDate.trim() === '') {
+      throw new Error(`"${target.name}" ödemesi için geçerli bir vade tarihi bulunamadı. Vade tarihi olmadan ödeme onaylanamaz.`);
+    }
+
+    const validated = validateAndResolvePaymentDate(target.nextPaymentDate);
+    const paidPeriod = validated.targetPeriod;
+    const paidDueDate = validated.dateStr;
+    const todayStr = new Date().toISOString().split('T')[0];
+
     setPayingRegularPaymentId(id);
 
     try {
-      const currentMonth = format(new Date(), 'yyyy-MM');
-      const todayStr = new Date().toISOString().split('T')[0];
-
       let nextDate = target.nextPaymentDate;
       try {
         const parsed = parseISO(target.nextPaymentDate);
@@ -869,11 +879,27 @@ export default function App() {
         nextDate = nextMonth.toISOString().split('T')[0];
       } catch {}
 
+      const updatedPaidMonths = target.paidMonths
+        ? Array.from(new Set([...target.paidMonths, paidPeriod]))
+        : undefined;
+
+      const newHistoryItem = {
+        month: paidPeriod,
+        date: todayStr,
+        amount: target.amount,
+        ...(target.note ? { note: target.note } : {})
+      };
+      const updatedPaymentHistory = target.paymentHistory
+        ? [...target.paymentHistory, newHistoryItem]
+        : undefined;
+
       const updatedPayment: RegularPayment = {
         ...target,
         lastPaidDate: todayStr,
-        lastPaidMonth: currentMonth,
-        nextPaymentDate: nextDate
+        lastPaidMonth: paidPeriod,
+        nextPaymentDate: nextDate,
+        ...(updatedPaidMonths !== undefined ? { paidMonths: updatedPaidMonths } : {}),
+        ...(updatedPaymentHistory !== undefined ? { paymentHistory: updatedPaymentHistory } : {})
       };
 
       setRegularPayments(prev => {
@@ -891,13 +917,11 @@ export default function App() {
         setDoc(doc(db, 'regularPayments', id), updatedPayment, { merge: true }).catch(() => {});
       }
 
-      // Turn Google Calendar event green (colorId: 10 - Basil) for due auto/manual payment
+      // Turn Google Calendar event green (colorId: 10 - Basil) for the explicit paidPeriod
       const token = getCachedAccessToken();
       const targetCalId = profile?.calendarSettings?.calendarId || 'primary';
       if (token) {
         try {
-          const paidPeriod = target.nextPaymentDate ? target.nextPaymentDate.slice(0, 7) : currentMonth;
-          const paidDueDate = target.nextPaymentDate || todayStr;
           const paidEventId = await markRegularPaymentEventPaidInGoogleCalendar(token, targetCalId, {
             id: target.id,
             paidPeriod,
@@ -909,7 +933,6 @@ export default function App() {
             payee: target.payee,
             category: target.category,
             isAutoPayment: target.isAutoPayment,
-            isPaid: true,
             lastPaidMonth: updatedPayment.lastPaidMonth,
             paidMonths: updatedPayment.paidMonths,
             paymentHistory: updatedPayment.paymentHistory,
@@ -1573,7 +1596,6 @@ export default function App() {
                   payee: regPay.payee,
                   category: regPay.category,
                   isAutoPayment: regPay.isAutoPayment,
-                  isPaid: true,
                   lastPaidMonth: regPay.lastPaidMonth,
                   paidMonths: regPay.paidMonths,
                   paymentHistory: regPay.paymentHistory,

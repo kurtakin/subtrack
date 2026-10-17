@@ -1538,9 +1538,10 @@ export const markRegularPaymentEventPaidInGoogleCalendar = async (
   );
 
   // Check actual proof of payment for this explicit paid targetPeriod. Auto-payment preference is NOT proof!
+  // Unconditional isPaid: true CANNOT be used to hide a period mismatch with lastPaidMonth.
   const hasProof = Boolean(
-    payment.isPaid ||
-    isRegularPaymentPaidForPeriod(payment, targetPeriod)
+    isRegularPaymentPaidForPeriod(payment, targetPeriod) ||
+    (payment.isPaid === true && (!payment.lastPaidMonth || payment.lastPaidMonth === targetPeriod))
   );
 
   if (!hasProof) {
