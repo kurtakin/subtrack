@@ -1501,8 +1501,10 @@ export default function App() {
             }
           }
           
+          const newlyPaidPeriods: { period: string; dueDate: string }[] = [];
           while (differenceInCalendarDays(now, nextPaymentDate) >= 0) {
             const paymentMonthKey = format(nextPaymentDate, 'yyyy-MM');
+            const paymentDueDateStr = format(nextPaymentDate, 'yyyy-MM-dd');
             if (!existingMonthKeys.has(paymentMonthKey)) {
               if (user) {
                 try {
@@ -1516,6 +1518,7 @@ export default function App() {
                     note: 'Otomatik Plan Yenilemesi'
                   });
                   existingMonthKeys.add(paymentMonthKey);
+                  newlyPaidPeriods.push({ period: paymentMonthKey, dueDate: paymentDueDateStr });
                 } catch (error) {
                   console.error(`Failed to auto-record payment for ${sub.name}:`, error);
                   break; 
@@ -1531,26 +1534,39 @@ export default function App() {
           }
 
           if (updated) {
+            const lastPaidItem = newlyPaidPeriods[newlyPaidPeriods.length - 1];
             if (user) {
               try {
                 await updateDoc(doc(db, 'subscriptions', sub.id), {
-                  nextPaymentDate: nextPaymentDate.toISOString()
+                  nextPaymentDate: nextPaymentDate.toISOString(),
+                  ...(lastPaidItem ? {
+                    lastPaidMonth: lastPaidItem.period,
+                    lastPaidDate: lastPaidItem.dueDate
+                  } : {})
                 });
               } catch (error) {
                 console.error(`Failed to update subscription date for ${sub.name}:`, error);
               }
             }
 
-            // If connected to Google Calendar, turn event green (colorId: 10 - Basil)
-            if (token) {
-              markSubscriptionEventPaidInGoogleCalendar(token, targetCalId, {
-                eventId: sub.calendarEventId,
-                name: sub.name,
-                amount: sub.amount,
-                currency: profile?.currency || 'USD',
-                category: sub.category,
-                dueDate: currentNextDateString
-              }).catch(() => {});
+            // If connected to Google Calendar, turn event green (colorId: 10 - Basil) for each verified paid period
+            if (token && newlyPaidPeriods.length > 0) {
+              for (const paidItem of newlyPaidPeriods) {
+                markSubscriptionEventPaidInGoogleCalendar(token, targetCalId, {
+                  id: sub.id,
+                  name: sub.name,
+                  amount: sub.amount,
+                  currency: profile?.currency || 'USD',
+                  category: sub.category,
+                  billingCycle: sub.billingCycle,
+                  paidPeriod: paidItem.period,
+                  dueDate: paidItem.dueDate,
+                  eventId: sub.calendarEventId,
+                  lastPaidMonth: paidItem.period,
+                  lastPaidDate: paidItem.dueDate,
+                  isPaid: true
+                }).catch(() => {});
+              }
             }
           }
         }

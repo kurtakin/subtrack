@@ -974,10 +974,61 @@ export function isRegularPaymentPaidForPeriod(
   return false;
 }
 
+export interface SubscriptionPaymentLike {
+  date: string;
+  status?: string;
+  type?: string;
+  month?: string;
+}
+
+export interface SubscriptionPaidCheckTarget {
+  id?: string;
+  lastPaidMonth?: string;
+  lastPaidDate?: string;
+  paidMonths?: string[];
+  paymentHistory?: Array<{ month?: string; date?: string; status?: string }>;
+  payments?: SubscriptionPaymentLike[];
+  isPaid?: boolean;
+  paidPeriod?: string;
+}
+
+/**
+ * Checks whether a subscription is actually marked paid for the specified explicit target period.
+ * Auto-payment preference is NOT proof of payment. Another period's payment does NOT count.
+ */
+export function isSubscriptionPaidForPeriod(
+  subscription: SubscriptionPaidCheckTarget,
+  targetPeriod: string
+): boolean {
+  if (subscription.lastPaidMonth === targetPeriod) return true;
+  if (subscription.lastPaidDate && (!subscription.lastPaidMonth || subscription.lastPaidMonth === targetPeriod)) {
+    const p = subscription.lastPaidDate.slice(0, 7);
+    if (p === targetPeriod) return true;
+  }
+  if (subscription.paidMonths && subscription.paidMonths.includes(targetPeriod)) return true;
+  if (subscription.paymentHistory && subscription.paymentHistory.some(h => {
+    if (h.month === targetPeriod) return true;
+    if (h.date && h.date.slice(0, 7) === targetPeriod && (!h.status || h.status === 'paid')) return true;
+    return false;
+  })) return true;
+  if (subscription.payments && subscription.payments.some(p => {
+    const period = p.month || p.date.slice(0, 7);
+    return period === targetPeriod && (!p.status || p.status === 'paid');
+  })) return true;
+  if (subscription.paidPeriod === targetPeriod && subscription.isPaid === true && (!subscription.lastPaidMonth || subscription.lastPaidMonth === targetPeriod)) {
+    return true;
+  }
+  return false;
+}
+
 export interface GoogleCalendarVerifiedEvent {
   id: string;
   summary?: string;
   description?: string;
+  recurrence?: string[];
+  colorId?: string;
+  start?: { date?: string; dateTime?: string };
+  end?: { date?: string; dateTime?: string };
   extendedProperties?: {
     private?: {
       budfolApp?: string;
@@ -1715,126 +1766,261 @@ export const markRegularPaymentEventPaidInGoogleCalendar = async (
   }
 };
 
+export interface MarkSubscriptionPaidPayload {
+  id: string; // real subscription record ID
+  name: string;
+  amount: number;
+  paidPeriod?: string; // explicit paid period e.g. "2026-10"
+  dueDate?: string; // due date of the paid period e.g. "2026-10-15"
+  currency?: string;
+  category?: string;
+  billingCycle?: 'monthly' | 'yearly';
+  eventId?: string; // existing event ID if known
+  lang?: string;
+  isAutoPayment?: boolean;
+  isPaid?: boolean;
+  lastPaidMonth?: string;
+  lastPaidDate?: string;
+  paidMonths?: string[];
+  paymentHistory?: Array<{ month?: string; date?: string; status?: string }>;
+  payments?: SubscriptionPaymentLike[];
+  note?: string;
+}
+
 /**
- * Marks a subscription event in Google Calendar as paid / auto-renewed (Green, colorId: 10).
- * Searches and creates fallback if not already on calendar.
+ * Marks a subscription event in Google Calendar as paid with GREEN color (colorId: 10 - Basil).
+ * Strictly uses the real record ID and explicit paid period (distinct from next payment date).
+ * Uses the exact same deterministic event ID formula as regular synchronization.
+ * Verifies existing event ownership using runtime type guards and validation helpers.
+ * Does NOT adopt events based on name, summary, or date similarity, and never creates ID-less events.
+ * Only updates to green when actual proof of payment exists for the paid period (auto-pay preference is not proof).
+ * Prevents painting the entire recurring event green by leaving recurring series intact and targeting only the paid period.
+ * Stops on validation errors without writing; only creates event with deterministic ID upon definitive 404.
  */
 export const markSubscriptionEventPaidInGoogleCalendar = async (
   accessToken: string,
   calendarId: string,
-  subscription: {
-    eventId?: string;
-    name: string;
-    amount: number;
-    currency?: string;
-    category?: string;
-    lang?: string;
-    dueDate?: string;
+  subscription: MarkSubscriptionPaidPayload
+): Promise<string> => {
+  if (!accessToken) {
+    throw new Error('Google erişim anahtarı bulunamadı.');
   }
-): Promise<string | null> => {
-  if (!accessToken) return null;
-  const targetCalId = encodeURIComponent(calendarId || 'primary');
-  const curr = subscription.currency || 'USD';
-  const isEn = subscription.lang === 'en';
-  const rawDate = (subscription.dueDate || '').split('T')[0] || new Date().toISOString().split('T')[0];
-  const parts = rawDate.split('-').map(Number);
-  const y = parts[0] || new Date().getFullYear();
-  const m = parts[1] || (new Date().getMonth() + 1);
-  const d = parts[2] || new Date().getDate();
-  const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
+  if (!subscription.id || typeof subscription.id !== 'string' || subscription.id.trim() === '') {
+    throw new Error('Abonelik kayıt kimliği (id) belirtilmedi.');
+  }
+
+  if (!subscription.name || typeof subscription.name !== 'string' || subscription.name.trim() === '') {
+    throw new Error('Abonelik adı belirtilmedi.');
+  }
+
+  if (typeof subscription.amount !== 'number' || isNaN(subscription.amount)) {
+    throw new Error('Geçerli bir abonelik tutarı belirtilmedi.');
+  }
+
+  // Resolve and validate payment date & target period for the PAID period (not next payment date)
+  const resolvedDueDate = subscription.dueDate || (subscription.paidPeriod ? `${subscription.paidPeriod}-01` : '');
+  if (!resolvedDueDate) {
+    throw new Error('Ödenen dönem (paidPeriod) veya vade tarihi (dueDate) belirtilmedi.');
+  }
+
+  const { dateStr, targetPeriod, year: y, month: m, day: d } = validateAndResolvePaymentDate(
+    resolvedDueDate,
+    subscription.paidPeriod
+  );
+
+  // Check actual proof of payment for this explicit paid targetPeriod. Auto-payment preference is NOT proof!
+  // Unconditional isPaid: true CANNOT be used to hide a period mismatch with lastPaidMonth.
+  const hasProof = Boolean(
+    isSubscriptionPaidForPeriod(subscription, targetPeriod) ||
+    (subscription.isPaid === true && (!subscription.lastPaidMonth || subscription.lastPaidMonth === targetPeriod) && (!subscription.paidPeriod || subscription.paidPeriod === targetPeriod))
+  );
+
+  if (!hasProof) {
+    throw new Error(`"${subscription.name}" aboneliği için "${targetPeriod}" dönemine ait doğrulanmış bir ödeme kaydı bulunamadı. Otomatik ödeme talimatı veya tercihi tek başına ödeme kanıtı sayılamaz.`);
+  }
+
+  const targetCalId = encodeURIComponent(calendarId || 'primary');
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() + 1);
   const endDateStr = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+  const curr = subscription.currency || 'USD';
+  const isEn = subscription.lang === 'en';
 
-  const summary = isEn
-    ? `✅ [PAID - Auto-Pay] ${subscription.name} - ${subscription.amount.toFixed(2)} ${curr}`
-    : `✅ [ÖDENDİ - Otomatik Ödeme] ${subscription.name} - ${subscription.amount.toFixed(2)} ${curr}`;
-
-  const description = isEn
-    ? `SubTrack Automatic Plan Renewal\n\n📌 Service / Subscription: ${subscription.name}\n💳 Amount: ${subscription.amount.toFixed(2)} ${curr}\n\nThis payment was automatically processed on its due date and highlighted in green (Paid) in your Google Calendar.`
-    : `SubTrack Otomatik Plan Yenilemesi\n\n📌 Servis / Abonelik: ${subscription.name}\n💳 Tutar: ${subscription.amount.toFixed(2)} ${curr}\n\nBu ödeme günü geldiğinde SubTrack tarafından otomatik olarak ödendi olarak işaretlenmiş ve takvimde yeşil renkle güncellenmiştir.`;
+  // Use the same deterministic ID format as regular synchronization
+  const stableEventId = generateStableCalendarEventId('sub', subscription.id, targetPeriod);
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
 
   try {
-    let targetEventId = subscription.eventId;
+    let verifiedEventId: string | undefined;
 
-    if (!targetEventId) {
+    if (subscription.eventId) {
+      const checkUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${encodeURIComponent(subscription.eventId)}`;
+      let checkRes: Response;
       try {
-        const searchMin = `${y}-${String(m).padStart(2, '0')}-01T00:00:00Z`;
-        const endMonthDate = new Date(Date.UTC(y, m, 0));
-        const searchMax = `${y}-${String(m).padStart(2, '0')}-${String(endMonthDate.getUTCDate()).padStart(2, '0')}T23:59:59Z`;
-        const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events?timeMin=${encodeURIComponent(searchMin)}&timeMax=${encodeURIComponent(searchMax)}&q=${encodeURIComponent(subscription.name)}`;
-        const searchRes = await fetch(searchUrl, {
+        checkRes = await fetch(checkUrl, {
           headers: { Authorization: `Bearer ${accessToken}` },
           signal: controller.signal
         });
-        if (searchRes.ok) {
-          const searchData = await searchRes.json();
-          if (searchData.items && searchData.items.length > 0) {
-            const match = searchData.items.find((item: any) => 
-              (item.summary && item.summary.toLowerCase().includes(subscription.name.toLowerCase()))
-            ) || searchData.items[0];
-            targetEventId = match?.id;
-          }
+      } catch (fetchErr: unknown) {
+        if (controller.signal.aborted) {
+          throw new Error(`Google Takvim doğrulama isteği zaman aşımına uğradı (timeout). Mevcut etkinlik (${subscription.eventId}) durumu doğrulanamadığı için takvim yazma işlemi durduruldu.`);
         }
-      } catch {}
+        const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        throw new Error(`Google Takvim ağına erişilemedi (ağ hatası: ${msg}). Mevcut etkinlik (${subscription.eventId}) durumu doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+      }
+
+      if (checkRes.status === 404) {
+        // Kesin 404: Takvimde mevcut değil; bu ödenen dönem için deterministik kimlik ile sıfırdan oluşturulabilir
+        verifiedEventId = undefined;
+      } else if (!checkRes.ok) {
+        if (checkRes.status === 401) {
+          setCachedAccessToken(null);
+          throw new Error(`Google Takvim oturum süresi doldu (401). Mevcut etkinlik (${subscription.eventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu. Lütfen Google Takvim bağlantısını yenileyin.`);
+        }
+        if (checkRes.status === 403) {
+          throw new Error(`Google Takvim erişim yetkisi veya kota hatası (403). Mevcut etkinlik (${subscription.eventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+        }
+        if (checkRes.status === 429) {
+          throw new Error(`Google Takvim istek limiti aşıldı (429). Mevcut etkinlik (${subscription.eventId}) sahipliği doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+        }
+        if (checkRes.status >= 500) {
+          throw new Error(`Google Takvim sunucu hatası (${checkRes.status}). Mevcut etkinlik (${subscription.eventId}) durumu doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+        }
+        throw new Error(`Google Takvim doğrulama hatası (${checkRes.status}). Mevcut etkinlik (${subscription.eventId}) durumu doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+      } else {
+        // 200 OK: validateCalendarEventResponse ile yapı ve metadata kontrolü yap
+        let rawParsed: unknown;
+        try {
+          rawParsed = await checkRes.json();
+        } catch (jsonErr: unknown) {
+          const msg = jsonErr instanceof Error ? jsonErr.message : String(jsonErr);
+          throw new Error(`Google Takvim yanıtı çözümlenemedi (bozuk yanıt: ${msg}). Mevcut etkinlik (${subscription.eventId}) durumu doğrulanamadığı için takvim yazma işlemi durduruldu.`);
+        }
+
+        const checkData = validateCalendarEventResponse(rawParsed, subscription.eventId);
+        const priv = checkData.extendedProperties?.private;
+        const isRecurring = Array.isArray(checkData.recurrence) && checkData.recurrence.length > 0;
+
+        if (priv?.budfolApp === 'budfol' && priv?.budfolRecordId === subscription.id && priv?.budfolPeriod === targetPeriod) {
+          if (isRecurring) {
+            // Tekrarlayan ana etkinliğin tamamı yeşile boyanmaz! Gelecek dönemleri korumak için ana etkinlik bırakılır; bu ödenen dönem için deterministik tekil kimlik kullanılır.
+            verifiedEventId = undefined;
+          } else {
+            // Aynı uygulama, kayıt ve ödenen hedef döneme ait tekil etkinlik doğrulandı: bu mevcut etkinliği güncelle
+            verifiedEventId = subscription.eventId;
+          }
+        } else {
+          // Metadata içermeyen fakat geçerli kişisel etkinlik veya farklı kayıt/dönem tespiti:
+          // Bu mevcut etkinliğin üzerine yazılmaz; bu ödenen dönem için deterministik kimlik kullanılır.
+          verifiedEventId = undefined;
+        }
+      }
     }
 
-    if (targetEventId) {
-      const url = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${targetEventId}`;
-      const res = await fetch(url, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          summary,
-          colorId: '10', // Forest Green / Basil
-          description,
-          reminders: { useDefault: false, overrides: [] }
-        }),
-        signal: controller.signal
-      });
-      if (res.ok) {
-        const data = await res.json();
-        return data.id || targetEventId;
-      }
-      if (res.status === 401) {
-        setCachedAccessToken(null);
-        return null;
-      }
-    }
+    const targetEventId = verifiedEventId || stableEventId;
 
-    const postUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events`;
-    const postRes = await fetch(postUrl, {
-      method: 'POST',
+    const summary = isEn
+      ? `✅ [PAID] ${subscription.name} - ${subscription.amount.toFixed(2)} ${curr}`
+      : `✅ [ÖDENDİ] ${subscription.name} - ${subscription.amount.toFixed(2)} ${curr}`;
+
+    const description = isEn
+      ? `✅ BUDFOL SUBSCRIPTION PAYMENT RECORDED AS PAID!\n\n` +
+        `📌 Service / Subscription: ${subscription.name}\n` +
+        `💳 Amount: ${subscription.amount.toFixed(2)} ${curr}\n` +
+        (subscription.category ? `🏷️ Category: ${subscription.category}\n` : '') +
+        `📅 Due / Payment Date: ${dateStr}\n` +
+        `🔄 Payment Status: Paid (Green)\n` +
+        `🎯 Target Period: ${targetPeriod}\n` +
+        (subscription.billingCycle ? `🔄 Billing Cycle: ${subscription.billingCycle === 'yearly' ? 'Yearly' : 'Monthly'}\n` : '') +
+        (subscription.isAutoPayment ? `⚙️ Payment Preference: Auto-Pay Instruction\n` : `⚙️ Payment Preference: Manual Payment\n`) +
+        (subscription.note ? `📝 Note: ${subscription.note}\n` : '') +
+        `\nThis event was updated in Google Calendar by Budfol.`
+      : `✅ BUDFOL ABONELİK ÖDEMESİ ÖDENDİ OLARAK KAYDEDİLDİ!\n\n` +
+        `📌 Servis / Abonelik: ${subscription.name}\n` +
+        `💳 Tutar: ${subscription.amount.toFixed(2)} ${curr}\n` +
+        (subscription.category ? `🏷️ Kategori: ${subscription.category}\n` : '') +
+        `📅 Vade / Ödeme Tarihi: ${dateStr}\n` +
+        `🔄 Ödeme Durumu: Ödendi (Yeşil)\n` +
+        `🎯 Hedef Dönem: ${targetPeriod}\n` +
+        (subscription.billingCycle ? `🔄 Dönem: ${subscription.billingCycle === 'yearly' ? 'Yıllık' : 'Aylık'}\n` : '') +
+        (subscription.isAutoPayment ? `⚙️ Ödeme Tercihi: Otomatik Ödeme Talimatlı\n` : `⚙️ Ödeme Tercihi: Manuel Ödeme\n`) +
+        (subscription.note ? `📝 Not: ${subscription.note}\n` : '') +
+        `\nBu etkinlik Budfol tarafından Google Takvim'de güncellenmiştir.`;
+
+    const eventBody = {
+      id: targetEventId,
+      summary,
+      description,
+      start: { date: dateStr },
+      end: { date: endDateStr },
+      colorId: '10', // Forest Green / Basil
+      reminders: {
+        useDefault: false,
+        overrides: []
+      },
+      extendedProperties: {
+        private: {
+          budfolApp: 'budfol',
+          budfolType: 'subscription',
+          budfolRecordId: subscription.id,
+          budfolPeriod: targetPeriod
+        }
+      },
+      transparency: 'transparent'
+    };
+
+    const putUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events/${targetEventId}`;
+    let res = await fetch(putUrl, {
+      method: 'PUT',
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        summary,
-        description,
-        start: { date: dateStr },
-        end: { date: endDateStr },
-        colorId: '10',
-        transparency: 'transparent',
-        reminders: { useDefault: false, overrides: [] }
-      }),
+      body: JSON.stringify(eventBody),
       signal: controller.signal
     });
-    if (postRes.ok) {
-      const d = await postRes.json();
-      return d.id;
+
+    if (res.status === 404) {
+      const postUrl = `https://www.googleapis.com/calendar/v3/calendars/${targetCalId}/events`;
+      res = await fetch(postUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(eventBody),
+        signal: controller.signal
+      });
+
+      if (res.status === 409) {
+        res = await fetch(putUrl, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(eventBody),
+          signal: controller.signal
+        });
+      }
     }
-  } catch (err) {
-    console.warn('Could not mark subscription as paid in Google Calendar:', err);
+
+    if (!res.ok) {
+      if (res.status === 401) {
+        setCachedAccessToken(null);
+        throw new Error('Oturum süresi doldu (401). Lütfen Google Takvim bağlantısını yenileyin.');
+      }
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error?.message || `Takvim etkinliği güncellenemedi (${res.status})`);
+    }
+
+    const data = await res.json();
+    return data.id || targetEventId;
   } finally {
     clearTimeout(timeoutId);
   }
-  return null;
 };
+
