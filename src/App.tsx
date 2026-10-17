@@ -75,6 +75,7 @@ import { AuthContext } from './context/AuthContext';
 import { useTranslation } from './context/LanguageContext';
 import { formatCurrency, getCurrencySymbol, isDemoItem, COLORS } from './constants';
 import { getLocalizedCategoryName } from './utils/categoryTranslator';
+import { cleanSubscriptionPayload } from './utils/subscriptionUtils';
 import { Navbar, MainNavTab } from './components/Navbar';
 import { AppSidebar } from './components/AppSidebar';
 import { AppHeader } from './components/AppHeader';
@@ -2380,10 +2381,7 @@ export default function App() {
   };
 
   const handleSaveSubscription = (savedSub: Subscription) => {
-    const targetSub = {
-      ...savedSub,
-      uid: user?.uid || DEFAULT_PROFILE.uid
-    };
+    const targetSub = cleanSubscriptionPayload(savedSub, user?.uid || DEFAULT_PROFILE.uid);
 
     // Remove from deleted tombstone if it was re-added
     try {

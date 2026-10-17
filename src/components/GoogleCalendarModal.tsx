@@ -250,7 +250,10 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
       };
 
       // Non-blocking firestore sync
-      setDoc(doc(db, 'subscriptions', sub.id), updatedSub, { merge: true }).catch(err => {
+      setDoc(doc(db, 'subscriptions', sub.id), {
+        calendarEventId: result.eventId,
+        calendarSyncedAt: new Date().toISOString()
+      }, { merge: true }).catch(err => {
         console.warn('Firestore sync skipped/offline:', err);
       });
 
@@ -361,7 +364,10 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
               calendarSyncedAt: new Date().toISOString()
             };
 
-            setDoc(doc(db, 'subscriptions', sub.id), updatedSub, { merge: true }).catch(err => {
+            setDoc(doc(db, 'subscriptions', sub.id), {
+              calendarEventId: result.eventId,
+              calendarSyncedAt: new Date().toISOString()
+            }, { merge: true }).catch(err => {
               console.warn('Firestore offline, write queued locally:', err);
             });
 
@@ -952,7 +958,10 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
                 calendarEventId: res.eventId,
                 calendarSyncedAt: new Date().toISOString()
               };
-              setDoc(doc(db, 'subscriptions', sub.id), updated, { merge: true }).catch(() => {});
+              setDoc(doc(db, 'subscriptions', sub.id), {
+                calendarEventId: res.eventId,
+                calendarSyncedAt: new Date().toISOString()
+              }, { merge: true }).catch(() => {});
               onUpdateSubscription?.(updated);
             }
           } catch {}

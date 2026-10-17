@@ -8,6 +8,7 @@ import { Subscription, OperationType, FirestoreErrorInfo } from '../types';
 import { AuthContext } from '../context/AuthContext';
 import { CATEGORIES, ICON_OPTIONS, ICON_MAP, getCurrencySymbol } from '../constants';
 import { getLocalizedCategoryName } from '../utils/categoryTranslator';
+import { cleanSubscriptionPayload } from '../utils/subscriptionUtils';
 import {
   syncEventToGoogleCalendar,
   deleteGoogleCalendarEvent,
@@ -168,34 +169,47 @@ export const AddEditModal = ({
     }
 
     setDuplicateError(null);
-    const data = {
+    const subId = sub?.id || `sub_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const existingEventId = sub?.calendarEventId;
+
+    const baseData: Subscription = {
+      id: subId,
       uid: user.uid,
-      name: formData.name,
+      name: formData.name.trim(),
       amount: parseFloat(formData.amount) || 0,
       category: formData.category,
       billingCycle: formData.billingCycle,
       nextPaymentDate: new Date(formData.nextPaymentDate).toISOString(),
       status: formData.status,
       icon: formData.icon,
-      pricingType: formData.pricingType,
-      isAutoPayment: sub?.isAutoPayment,
-      note: sub?.note,
-      isPaid: sub?.isPaid,
-      lastPaidMonth: sub?.lastPaidMonth,
-      lastPaidDate: sub?.lastPaidDate
+      pricingType: formData.pricingType
     };
 
-    const subId = sub?.id || `sub_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    const existingEventId = sub?.calendarEventId;
+    if (sub) {
+      if (sub.isAutoPayment !== undefined) baseData.isAutoPayment = sub.isAutoPayment;
+      if (sub.note !== undefined && sub.note.trim() !== '') baseData.note = sub.note.trim();
+      if (sub.isPaid !== undefined) baseData.isPaid = sub.isPaid;
+      if (sub.lastPaidMonth !== undefined) baseData.lastPaidMonth = sub.lastPaidMonth;
+      if (sub.lastPaidDate !== undefined) baseData.lastPaidDate = sub.lastPaidDate;
+      if (sub.lastNotified !== undefined) baseData.lastNotified = sub.lastNotified;
+    }
+    if (existingEventId) {
+      baseData.calendarEventId = existingEventId;
+    }
+    if (sub?.calendarSyncedAt) {
+      baseData.calendarSyncedAt = sub.calendarSyncedAt;
+    }
+
+    const cleanSub = cleanSubscriptionPayload(baseData, user.uid);
 
     // Immediately call onSave so user never loses their subscription
     if (onSave) {
-      onSave({ id: subId, ...data, calendarEventId: existingEventId });
+      onSave(cleanSub);
     }
 
     try {
-      // Save/merge to Firestore in background
-      setDoc(doc(db, 'subscriptions', subId), { ...data, id: subId }, { merge: true }).catch((err: any) => {
+      // Save/merge to Firestore in background without any undefined fields
+      setDoc(doc(db, 'subscriptions', subId), cleanSub, { merge: true }).catch((err: any) => {
         console.warn('Could not persist subscription to Firestore (working in local cache):', err);
       });
 
@@ -210,24 +224,29 @@ export const AddEditModal = ({
               calendarId,
               {
                 id: subId,
-                name: data.name,
-                amount: data.amount,
+                name: cleanSub.name,
+                amount: cleanSub.amount,
                 currency: profile?.currency || 'CAD',
-                category: data.category,
-                billingCycle: data.billingCycle,
-                nextPaymentDate: data.nextPaymentDate,
-                status: data.status,
-                isAutoPayment: data.isAutoPayment,
-                note: data.note
+                category: cleanSub.category,
+                billingCycle: cleanSub.billingCycle,
+                nextPaymentDate: cleanSub.nextPaymentDate,
+                status: cleanSub.status,
+                ...(cleanSub.isAutoPayment !== undefined ? { isAutoPayment: cleanSub.isAutoPayment } : {}),
+                ...(cleanSub.note !== undefined ? { note: cleanSub.note } : {})
               },
               existingEventId
             );
+            const syncedSub: Subscription = {
+              ...cleanSub,
+              calendarEventId: calResult.eventId,
+              calendarSyncedAt: new Date().toISOString()
+            };
             setDoc(doc(db, 'subscriptions', subId), {
               calendarEventId: calResult.eventId,
               calendarSyncedAt: new Date().toISOString()
             }, { merge: true }).catch(() => {});
             if (onSave) {
-              onSave({ id: subId, ...data, calendarEventId: calResult.eventId, calendarSyncedAt: new Date().toISOString() });
+              onSave(syncedSub);
             }
           } catch (calErr) {
             console.error('Failed to sync to Google Calendar:', calErr);
